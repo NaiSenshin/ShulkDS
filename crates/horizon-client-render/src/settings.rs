@@ -261,7 +261,7 @@ impl Default for Settings {
             touch: crate::android_controls::Settings::load(),
             keypad: Default::default(),
             fov: 70.0,
-            render_distance: 12,
+            render_distance: 16,
             simulation_distance: 12,
             sensitivity: 0.5,
             master_volume: 1.0,

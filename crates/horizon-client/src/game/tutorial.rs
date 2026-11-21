@@ -189,6 +189,11 @@ impl super::Game<'_> {
 
 impl super::Game<'_> {
     pub(super) fn reset_tutorial(&mut self) {
+        if self.shulkds.config.enabled {
+            self.tutorial = Tutorial::new(Step::None);
+            self.tutorial_toasts.clear();
+            return;
+        }
         self.tutorial = Tutorial::new(Step::from_option(self.settings.file.int("tutorialStep")));
         self.tutorial_toasts.clear();
     }
@@ -248,6 +253,11 @@ impl super::Game<'_> {
 
     pub(super) fn tick_tutorial(&mut self) {
         use winit::keyboard::KeyCode;
+        if self.shulkds.config.enabled {
+            self.tutorial.step = Step::None;
+            self.tutorial_toasts.clear();
+            return;
+        }
         if self.title.is_some()
             || self.player.is_none()
             || self.options.dedicated.is_some()
@@ -486,6 +496,10 @@ impl super::Game<'_> {
         batch: &mut horizon_client::hud::HudBatch,
         hidden: bool,
     ) {
+        if self.shulkds.config.enabled {
+            self.tutorial_toasts.clear();
+            return;
+        }
         let wanted = self.tutorial.hint();
         for t in &mut self.tutorial_toasts {
             t.wanted = wanted.is_some_and(|(hint, _)| hint == t.hint);

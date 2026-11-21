@@ -154,11 +154,21 @@ impl ModList {
         }
         let _ = fs::write(path, self.serialize());
     }
+    /// Whether native mod `id` is currently active. Built-in native mods
+    /// default to on unless listed in `disabled`, except `distant_horizons`
+    /// which starts off until the player enables it (`mod.distant_horizons:true`).
+    pub fn is_native_on(&self, id: &str) -> bool {
+        if id == "distant_horizons" {
+            self.enabled.contains(id) && !self.disabled.contains(id)
+        } else {
+            !self.disabled.contains(id)
+        }
+    }
     pub fn is_on(&self, i: usize) -> bool {
         self.installed.get(i).is_some_and(|m| {
             m.dev
                 || if m.native.is_some() {
-                    !self.disabled.contains(&m.id)
+                    self.is_native_on(&m.id)
                 } else {
                     self.enabled.contains(&m.id)
                 }
@@ -172,11 +182,12 @@ impl ModList {
             return;
         };
         if m.native.is_some() {
-            if self.disabled.remove(&m.id) {
-                self.enabled.insert(m.id.clone());
-            } else {
+            if self.is_native_on(&m.id) {
                 self.enabled.remove(&m.id);
                 self.disabled.insert(m.id.clone());
+            } else {
+                self.disabled.remove(&m.id);
+                self.enabled.insert(m.id.clone());
             }
         } else if !self.enabled.remove(&m.id) {
             self.enabled.insert(m.id.clone());
@@ -242,5 +253,30 @@ mod tests {
         list.toggle(2);
         assert!(list.is_on(2));
         assert_eq!(list.serialize(), "mod.c:true\n");
+    }
+
+    #[test]
+    fn distant_horizons_starts_off_and_toggles_cleanly() {
+        let mut list = ModList {
+            installed: vec![Installed {
+                id: "distant_horizons".into(),
+                title: "Distant Horizons".into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native: Some(NativePage::default()),
+            }],
+            ..Default::default()
+        };
+        assert!(!list.is_on(0));
+        assert!(!list.is_native_on("distant_horizons"));
+        list.toggle(0);
+        assert!(list.is_on(0));
+        assert!(list.is_native_on("distant_horizons"));
+        assert_eq!(list.serialize(), "mod.distant_horizons:true\n");
+        list.toggle(0);
+        assert!(!list.is_on(0));
+        assert!(!list.is_native_on("distant_horizons"));
+        assert_eq!(list.serialize(), "mod.distant_horizons:false\n");
     }
 }

@@ -19893,18 +19893,6 @@ impl<'a> Game<'a> {
             .map(Ok)
             .unwrap_or_else(|| GameCpuResources::load(&root))?;
         let world = World::new(res.facts().air, 0);
-        let tutorial = tutorial::Tutorial::new(tutorial::Step::from_option(
-            settings.file.int("tutorialStep"),
-        ));
-        let creative = options.creative;
-        let inventory = vec![None; 36];
-        let now = Instant::now();
-        let look = options.look;
-        let particles = horizon_client::particles::ParticleEngine::new(
-            &root,
-            &gui.atlas.sprites,
-            &gui.atlas.translucent,
-        );
         let shulkds_config = horizon_client::dual_screen::DualScreenConfig {
             enabled: true,
             mode: options
@@ -19922,6 +19910,20 @@ impl<'a> Game<'a> {
             shulkds_config,
             options.window_size[0],
             options.window_size[1],
+        );
+        let tutorial = tutorial::Tutorial::new(if shulkds.config.enabled {
+            tutorial::Step::None
+        } else {
+            tutorial::Step::from_option(settings.file.int("tutorialStep"))
+        });
+        let creative = options.creative;
+        let inventory = vec![None; 36];
+        let now = Instant::now();
+        let look = options.look;
+        let particles = horizon_client::particles::ParticleEngine::new(
+            &root,
+            &gui.atlas.sprites,
+            &gui.atlas.translucent,
         );
         Ok(Game {
             world_biomes: None,

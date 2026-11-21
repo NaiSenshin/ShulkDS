@@ -1151,11 +1151,7 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
     use crate::system_stats::Tier;
     let high = tier == Tier::High;
     s.max_fps = 60;
-    s.render_distance = match tier {
-        Tier::High => 10,
-        Tier::Mid => 8,
-        Tier::Low => 6,
-    };
+    s.render_distance = 16;
     s.simulation_distance = if high { 8 } else { 6 };
     s.clouds = if high { "fast" } else { "false" }.into();
     s.particles = if high { 1 } else { 2 };
@@ -1171,6 +1167,7 @@ pub fn apply_mobile_defaults(tier: crate::system_stats::Tier, s: &mut crate::set
     s.weather_radius = if high { 5 } else { 3 };
     // Bedrock's touch default: the stick walks up a block without the jump button.
     s.auto_jump = true;
+    let _ = s.file.set_text("tutorialStep", "none");
     s.graphics_preset = "custom".into();
     let g = &mut s.horizon;
     g.preset = Preset::Custom;
@@ -1207,7 +1204,7 @@ mod tests {
         let mut high = crate::settings::Settings::default();
         apply_mobile_defaults(Tier::High, &mut high);
         assert_eq!((low.max_fps, high.max_fps), (60, 60));
-        assert!(low.render_distance < high.render_distance);
+        assert_eq!((low.render_distance, high.render_distance), (16, 16));
         assert_eq!(
             (low.clouds.as_str(), high.clouds.as_str()),
             ("false", "fast")
@@ -1219,7 +1216,7 @@ mod tests {
         // What the options screens read back.
         let file = high.to_file();
         let back = crate::settings::Settings::from_file(file);
-        assert_eq!(back.render_distance, 10);
+        assert_eq!(back.render_distance, 16);
         assert!(back.auto_jump);
     }
 
