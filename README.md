@@ -12,6 +12,10 @@
 
 > **No Minecraft files included.** Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft. ShulkDS ships **no** Minecraft `.jar` files, assets, textures, or decompiled code: on first launch you sign in with a Microsoft account that owns *Minecraft: Java Edition*, and ShulkDS downloads and prepares official 26.3 directly on your device.
 
+<p align="center">
+  <img src="packaging/screenshots/dual_screen.png" alt="ShulkDS Dual-Screen Title Hub on Retroid Pocket Duo" width="600">
+</p>
+
 ## Highlights in v1.0.0
 
 - **120 Hz Dual-Surface Vulkan Rendering:** Dedicated `SecondaryDisplay` Android `Presentation` + `SurfaceView` driving the lower touchscreen on a shared `wgpu::Device` (`Rgba8Unorm`/`Rgba8UnormSrgb`), triple-buffered hardware `Fifo` VSync on Display 0, on-demand `ADPF` (`APerformanceHint`) frame boost, and decoupled bottom-screen HUD buffers.
