@@ -31,6 +31,13 @@
 - **Single-Pass FSR 1.0 & Mobile 2x Reprojection FrameGen:** Lightweight mobile spatial upscaling (Catmull-Rom + 75% RCAS) and 1-pass depth-reprojected `Frame Gen: 2x` tuned for handheld GPUs.
 - **Controller Polish:** Controlify-inspired `LookCurve`, `ReachAround`, 8-slice quick-action `RadialMenu`, `DPadDown` smooth hold-to-zoom, and `DPadLeft` chat shortcut.
 
+## Known Issues & Planned Features
+
+- Plan on making a Shulk dedicated server
+- More custom handheld-oriented features
+- Figure out how to use Distant Horizons without heating issues
+- Clean up the overall UI on AYN Thor devices (need a tester)
+
 ## Install (`v1.0.1`)
 
 1. Download **`shulkds-1.0.1-arm64-v8a.apk`** from the [Releases page](https://github.com/NaiSenshin/ShulkDS/releases/latest) (package ID `dev.shulkds.client`).
