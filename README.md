@@ -37,6 +37,8 @@
 - More custom handheld-oriented features
 - Figure out how to use Distant Horizons without heating issues
 - Clean up the overall UI on AYN Thor devices (need a tester)
+- Optional classic crafting
+- Optional classic inventory
 
 ## Install (`v1.0.1`)
 
