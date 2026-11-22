@@ -39,6 +39,7 @@
 - Clean up the overall UI on AYN Thor devices (need a tester)
 - Optional classic crafting
 - Optional classic inventory
+- Automatic updates system
 
 ## Install (`v1.0.1`)
 
