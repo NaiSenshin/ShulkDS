@@ -28,15 +28,21 @@ ShulkDS is a dual-screen Android fork of [Horizon](https://github.com/horizon-ru
 
 ## Known Issues & Planned Features
 
-- Plan on making a Shulk dedicated server
-- More custom handheld-oriented features
-- Figure out how to use Distant Horizons without heating issues
-- Clean up the overall UI on AYN Thor devices (need a tester)
-- Optional classic crafting
-- Optional classic inventory
-- Automatic updates system
-- Fix bottom screen size issues on AYN Thor
-- Fast crafting (holding craft button)
+1. [P0 - Critical] [Bug] Fix bottom-screen scaling and clean up UI (AYN Thor)
+2. [P1 - High] [Feature] Customizable hotbar and HUD positioning
+3. [P1 - High] [Bug] Investigate temporary 60 Hz refresh-rate lock (Retroid Pocket)
+4. [P1 - High] [Optimization] Reduce heating when using Distant Horizons
+5. [P1 - High] [Feature] Automatic update system
+6. [P1 - High] [Feature] Built-in bug reporting with logs and GitHub integration
+7. [P2 - Medium] [Feature] Optional classic crafting
+8. [P2 - Medium] [Feature] Optional classic inventory
+9. [P2 - Medium] [Feature] Fast crafting (hold craft button)
+10. [P2 - Medium] [Compatibility] Support additional Minecraft mods
+11. [P2 - Medium] [Feature] Built-in mod manager
+12. [P2 - Medium] [Feature] Complete French localization
+13. [P2 - Medium] [Feature] Local/offline account support
+14. [P3 - Low] [Feature] More handheld-oriented features
+15. [P3 - Low] [Project] Shulk dedicated server
 
 ## Install
 
