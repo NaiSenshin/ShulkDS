@@ -40,6 +40,8 @@
 - Optional classic crafting
 - Optional classic inventory
 - Automatic updates system
+- Fix bottom screen size issues on AYN Thor
+- Fast crafting (holding craft button)
 
 ## Install (`v1.0.1`)
 
