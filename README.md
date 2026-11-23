@@ -8,7 +8,7 @@
 
 # ShulkDS
 
-**ShulkDS v1.0.1** is an open-source dual-screen Android fork of [Horizon](https://github.com/horizon-rust/horizon) and [Starling](https://github.com/starling-client/starling) — the clean-room Rust rewrite of *Minecraft: Java Edition 26.3* — tailored for dual-screen clamshell Android handhelds such as the **Retroid Pocket Duo** (`1920x1080` 16:9 top + `1280x960` 4:3 touch bottom) and **AYN Thor** (`1920x1080` top + `1240x1080` bottom).
+**ShulkDS v1.0.1** is an open-source dual-screen Android fork of [Horizon](https://github.com/horizon-rust/horizon) and [Starling](https://github.com/starling-client/starling) — the clean-room Rust rewrite of *Minecraft: Java Edition 26.3* — tailored for dual-screen clamshell Android handhelds such as the **Retroid Pocket Duo** (`1920x1080` 16:9 top + `1280x960` 4:3 touch bottom) and (somewhat) **AYN Thor** (`1920x1080` top + `1240x1080` bottom).
 
 > **No Minecraft files included.** Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft. ShulkDS ships **no** Minecraft `.jar` files, assets, textures, or decompiled code: on first launch you sign in with a Microsoft account that owns *Minecraft: Java Edition*, and ShulkDS downloads and prepares official 26.3 directly on your device.
 
