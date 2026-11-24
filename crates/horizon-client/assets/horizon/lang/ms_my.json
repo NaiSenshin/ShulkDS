@@ -625,5 +625,18 @@
   "starling.mods.native.days_ago": "%s hari yang lalu",
   "starling.mods.native.next_build": "Next start: with %s, compiled %s.",
   "horizon.mods.not_built_tip": "Installed, not built into this game: build the game with it in the launcher (Settings > Native mods), then play the instance that build is in.",
-  "starling.mods.native.not_built_tip": "Installed, not in this game yet: Compile builds the game with it on Starling's build server."
+  "starling.mods.native.not_built_tip": "Installed, not in this game yet: Compile builds the game with it on Starling's build server.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Kedudukan Hotbar",
+  "horizon.extras.shulkds_hotbar.tooltip": "Pilih lokasi hotbar: bawah skrin bawah, atas skrin bawah, atau klasik di bawah bar XP pada skrin atas.",
+  "horizon.extras.shulkds_classic_crafting": "Pertukangan Klasik",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Gunakan grid manual Java 2x2 dan 3x3 dengan buku resipi menggantikan menu pertukangan edisi konsol.",
+  "horizon.extras.shulkds_classic_inventory": "Inventori Klasik",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Buka menu inventori Survival dan Creative klasik pada skrin atas apabila menekan Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Kemas Kini Auto",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Semak keluaran GitHub apabila ShulkDS dimulakan dan tawarkan muat turun kemas kini baharu.",
+  "horizon.shulkds.hotbar.bottom": "Skrin Bawah (Bawah)",
+  "horizon.shulkds.hotbar.top": "Skrin Bawah (Atas)",
+  "horizon.shulkds.hotbar.classic": "Skrin Atas (Klasik)",
+  "horizon.shulkds.check_updates": "Semak Kemas Kini"
 }

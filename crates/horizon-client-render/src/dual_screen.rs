@@ -93,6 +93,97 @@ impl DevicePreset {
             }
         }
     }
+
+    /// Native physical panel dimensions `(top_px, bottom_px)` for this handheld preset.
+    pub fn native_panel_sizes(&self) -> ([u32; 2], [u32; 2]) {
+        match self {
+            Self::RpDuo => ([1920, 1080], [1280, 960]),
+            Self::AynThor => ([1920, 1080], [1240, 1080]),
+            Self::Custom {
+                top_aspect,
+                bottom_aspect,
+            } => {
+                let tw = (1080.0 * top_aspect.0 as f32 / top_aspect.1.max(1) as f32).round() as u32;
+                let bw = (1080.0 * bottom_aspect.0 as f32 / bottom_aspect.1.max(1) as f32).round()
+                    as u32;
+                ([tw.max(1), 1080], [bw.max(1), 1080])
+            }
+        }
+    }
+}
+
+/// Where the persistent gameplay hotbar is shown in ShulkDS dual-screen mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HotbarPosition {
+    #[default]
+    BottomScreenBottom,
+    BottomScreenTop,
+    TopScreenClassic,
+}
+
+impl HotbarPosition {
+    pub const ALL: [Self; 3] = [
+        Self::BottomScreenBottom,
+        Self::BottomScreenTop,
+        Self::TopScreenClassic,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::BottomScreenBottom => "bottom",
+            Self::BottomScreenTop => "top",
+            Self::TopScreenClassic => "classic",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "top" | "bottom_top" | "top_of_bottom" => Self::BottomScreenTop,
+            "classic" | "top_classic" | "top_screen" => Self::TopScreenClassic,
+            _ => Self::BottomScreenBottom,
+        }
+    }
+
+    pub fn cycle(self, back: bool) -> Self {
+        let idx = Self::ALL.iter().position(|&p| p == self).unwrap_or(0);
+        let next = if back {
+            (idx + Self::ALL.len() - 1) % Self::ALL.len()
+        } else {
+            (idx + 1) % Self::ALL.len()
+        };
+        Self::ALL[next]
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::BottomScreenBottom => "Bottom Screen (Bottom)",
+            Self::BottomScreenTop => "Bottom Screen (Top)",
+            Self::TopScreenClassic => "Top Screen (Classic)",
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::BottomScreenBottom => "horizon.shulkds.hotbar.bottom",
+            Self::BottomScreenTop => "horizon.shulkds.hotbar.top",
+            Self::TopScreenClassic => "horizon.shulkds.hotbar.classic",
+        }
+    }
+}
+
+/// Compute the GUI scale for the secondary touch display so near-square panels like
+/// the AYN Thor (1240x1080) stay at crisp 4x scaling instead of dropping to 3x.
+pub fn shulkds_bottom_hud_scale(sec_size: [u32; 2], touch_scale: f32) -> f32 {
+    let mut scale = 1u32;
+    while sec_size[0] / (scale + 1) >= 300 && sec_size[1] / (scale + 1) >= 225 {
+        scale += 1;
+    }
+    let mult = if touch_scale.is_finite() {
+        touch_scale.clamp(0.75, 1.5)
+    } else {
+        1.0
+    };
+    (scale as f32 * mult).max(1.0)
 }
 
 /// Dual-screen configuration.
@@ -229,7 +320,8 @@ impl DualScreenLayout {
 
                 let top_rect = ViewportRect::new(top_x, start_y, top_w, top_h);
                 let hinge_rect = ViewportRect::new(top_x, start_y + top_h, top_w, hinge_h);
-                let bottom_rect = ViewportRect::new(bottom_x, start_y + top_h + hinge_h, bottom_w, bottom_h);
+                let bottom_rect =
+                    ViewportRect::new(bottom_x, start_y + top_h + hinge_h, bottom_w, bottom_h);
 
                 Self {
                     total_width: width,
@@ -351,11 +443,7 @@ pub enum DashboardTab {
 }
 
 impl DashboardTab {
-    pub const ALL: [Self; 3] = [
-        Self::Minimap,
-        Self::Inventory,
-        Self::Settings,
-    ];
+    pub const ALL: [Self; 3] = [Self::Minimap, Self::Inventory, Self::Settings];
 
     pub fn title(&self) -> &'static str {
         match self {
@@ -642,7 +730,14 @@ impl DualScreenPresenter {
         // 2. Bottom Letterbox (if clamshell ends above window bottom)
         let clamshell_bottom = bottom.y + bottom.height;
         if clamshell_bottom < screen_h {
-            batch.fill(atlas, 0.0, clamshell_bottom, screen_w, screen_h - clamshell_bottom, bezel_color);
+            batch.fill(
+                atlas,
+                0.0,
+                clamshell_bottom,
+                screen_w,
+                screen_h - clamshell_bottom,
+                bezel_color,
+            );
             batch.fill(atlas, 0.0, clamshell_bottom, screen_w, 1.0, border_color);
         }
 
@@ -653,7 +748,14 @@ impl DualScreenPresenter {
         }
         let top_right = top.x + top.width;
         if top_right < screen_w {
-            batch.fill(atlas, top_right, top.y, screen_w - top_right, top.height, bezel_color);
+            batch.fill(
+                atlas,
+                top_right,
+                top.y,
+                screen_w - top_right,
+                top.height,
+                bezel_color,
+            );
             batch.fill(atlas, top_right, top.y, 1.0, top.height, border_color);
         }
 
@@ -663,18 +765,46 @@ impl DualScreenPresenter {
         }
         let hinge_right = hinge.x + hinge.width;
         if hinge_right < screen_w {
-            batch.fill(atlas, hinge_right, hinge.y, screen_w - hinge_right, hinge.height, bezel_color);
+            batch.fill(
+                atlas,
+                hinge_right,
+                hinge.y,
+                screen_w - hinge_right,
+                hinge.height,
+                bezel_color,
+            );
         }
 
         // 5. Pillarbox beside Bottom Screen (left & right)
         if bottom.x > 0.0 {
             batch.fill(atlas, 0.0, bottom.y, bottom.x, bottom.height, bezel_color);
-            batch.fill(atlas, bottom.x - 1.0, bottom.y, 1.0, bottom.height, border_color);
+            batch.fill(
+                atlas,
+                bottom.x - 1.0,
+                bottom.y,
+                1.0,
+                bottom.height,
+                border_color,
+            );
         }
         let bottom_right = bottom.x + bottom.width;
         if bottom_right < screen_w {
-            batch.fill(atlas, bottom_right, bottom.y, screen_w - bottom_right, bottom.height, bezel_color);
-            batch.fill(atlas, bottom_right, bottom.y, 1.0, bottom.height, border_color);
+            batch.fill(
+                atlas,
+                bottom_right,
+                bottom.y,
+                screen_w - bottom_right,
+                bottom.height,
+                bezel_color,
+            );
+            batch.fill(
+                atlas,
+                bottom_right,
+                bottom.y,
+                1.0,
+                bottom.height,
+                border_color,
+            );
         }
     }
 }
@@ -826,5 +956,36 @@ mod tests {
         assert_eq!(gui_layout.bottom_viewport.height, 270.0);
         assert_eq!(gui_layout.bottom_viewport.width, 360.0);
         assert_eq!(gui_layout.bottom_viewport.x, 60.0);
+    }
+
+    #[test]
+    fn test_bottom_hud_scale_keeps_rp_duo_and_ayn_thor_at_4x() {
+        assert_eq!(shulkds_bottom_hud_scale([1280, 960], 1.0), 4.0);
+        assert_eq!(shulkds_bottom_hud_scale([1240, 1080], 1.0), 4.0);
+        assert_eq!(shulkds_bottom_hud_scale([960, 720], 1.0), 3.0);
+        assert_eq!(shulkds_bottom_hud_scale([1240, 1080], 1.25), 5.0);
+    }
+
+    #[test]
+    fn test_hotbar_position_round_trip_and_cycle() {
+        for pos in HotbarPosition::ALL {
+            assert_eq!(HotbarPosition::parse(pos.name()), pos);
+        }
+        assert_eq!(
+            HotbarPosition::BottomScreenBottom.cycle(false),
+            HotbarPosition::BottomScreenTop
+        );
+        assert_eq!(
+            HotbarPosition::BottomScreenTop.cycle(false),
+            HotbarPosition::TopScreenClassic
+        );
+        assert_eq!(
+            HotbarPosition::TopScreenClassic.cycle(false),
+            HotbarPosition::BottomScreenBottom
+        );
+        assert_eq!(
+            HotbarPosition::BottomScreenBottom.cycle(true),
+            HotbarPosition::TopScreenClassic
+        );
     }
 }

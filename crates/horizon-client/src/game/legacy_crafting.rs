@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum TabFilter {
     Crafting,
     Stonecutter,
@@ -51,6 +51,25 @@ pub(super) struct LegacyCraftingState {
     pub(super) stone_variant_offset: i32,
     pub(super) merchant_offset: usize,
     pub(super) merchant_selected: usize,
+    hold: Option<(TabFilter, std::time::Instant, bool, u32)>,
+    active_session: Option<(TabFilter, usize)>,
+    tab_picked: bool,
+    promoted_tab: Option<(usize, usize)>,
+    promoted_entries: Vec<usize>,
+    promoted_stone: Vec<usize>,
+    promoted_merchant: Vec<usize>,
+}
+
+impl LegacyCraftingState {
+    pub(super) fn clear_active_session(&mut self) {
+        self.active_session = None;
+        self.hold = None;
+        self.tab_picked = false;
+        self.promoted_tab = None;
+        self.promoted_entries.clear();
+        self.promoted_stone.clear();
+        self.promoted_merchant.clear();
+    }
 }
 
 fn crafting_tab_fallback(id: &str) -> &'static str {
@@ -223,6 +242,99 @@ fn villager_level_max_xp(level: i32) -> i32 {
     }
 }
 
+fn take_matching_ingredient<'a>(
+    ing: &'a horizon_client::crafting::Ingredient,
+    rem: &mut HashMap<String, u32>,
+) -> Option<&'a str> {
+    for cand in &ing.order {
+        if let Some(c) = rem.get_mut(cand.as_str())
+            && *c > 0
+        {
+            *c -= 1;
+            return Some(cand.as_str());
+        }
+    }
+    None
+}
+
+fn promote_and_sort_groups(
+    mut groups: Vec<Vec<usize>>,
+    promoted: &mut Vec<usize>,
+    mut is_craftable: impl FnMut(usize) -> bool,
+) -> Vec<Vec<usize>> {
+    for group in &groups {
+        for &entry_idx in group {
+            if is_craftable(entry_idx) && !promoted.contains(&entry_idx) {
+                promoted.push(entry_idx);
+            }
+        }
+    }
+    let rank: HashMap<usize, usize> = promoted
+        .iter()
+        .enumerate()
+        .map(|(i, &idx)| (idx, i))
+        .collect();
+    for group in &mut groups {
+        group.sort_by_key(|idx| rank.get(idx).map_or((1u8, 0), |&r| (0u8, r)));
+    }
+    groups.sort_by_key(|group| {
+        group
+            .first()
+            .and_then(|idx| rank.get(idx))
+            .map_or((1u8, 0), |&r| (0u8, r))
+    });
+    groups
+}
+
+fn promote_and_sort_stonecutting(
+    mut groups: Vec<(String, Vec<(usize, bool)>)>,
+    promoted: &mut Vec<usize>,
+) -> Vec<(String, Vec<(usize, bool)>)> {
+    for (_, group) in &groups {
+        for &(r_idx, can) in group {
+            if can && !promoted.contains(&r_idx) {
+                promoted.push(r_idx);
+            }
+        }
+    }
+    let rank: HashMap<usize, usize> = promoted
+        .iter()
+        .enumerate()
+        .map(|(i, &idx)| (idx, i))
+        .collect();
+    for (_, group) in &mut groups {
+        group.sort_by_key(|&(r_idx, _)| rank.get(&r_idx).map_or((1u8, 0), |&r| (0u8, r)));
+    }
+    groups.sort_by_key(|(_, group)| {
+        group
+            .first()
+            .and_then(|&(r_idx, _)| rank.get(&r_idx))
+            .map_or((1u8, 0), |&r| (0u8, r))
+    });
+    groups
+}
+
+fn promote_and_sort_merchant_offers(
+    len: usize,
+    promoted: &mut Vec<usize>,
+    mut is_tradeable: impl FnMut(usize) -> bool,
+) -> Vec<usize> {
+    promoted.retain(|&idx| idx < len);
+    for idx in 0..len {
+        if is_tradeable(idx) && !promoted.contains(&idx) {
+            promoted.push(idx);
+        }
+    }
+    let rank: HashMap<usize, usize> = promoted
+        .iter()
+        .enumerate()
+        .map(|(i, &idx)| (idx, i))
+        .collect();
+    let mut order: Vec<usize> = (0..len).collect();
+    order.sort_by_key(|idx| rank.get(idx).map_or((1u8, 0), |&r| (0u8, r)));
+    order
+}
+
 impl Game<'_> {
     fn player_inv_counts(&self) -> HashMap<String, u32> {
         let mut counts = HashMap::new();
@@ -271,8 +383,7 @@ impl Game<'_> {
             match slot {
                 None => return true,
                 Some(existing)
-                    if existing.same_item_same_components(result)
-                        && existing.count < max_stack =>
+                    if existing.same_item_same_components(result) && existing.count < max_stack =>
                 {
                     space += max_stack - existing.count;
                     if space >= result.count {
@@ -350,7 +461,7 @@ impl Game<'_> {
         groups
     }
 
-    fn crafting_tab_groups(&self, tab_idx: usize) -> Vec<Vec<usize>> {
+    fn raw_crafting_tab_groups(&self, tab_idx: usize) -> Vec<Vec<usize>> {
         let tabs = raw_crafting_tabs();
         let Some(tab) = tabs.get(tab_idx) else {
             return Vec::new();
@@ -395,8 +506,7 @@ impl Game<'_> {
             let mut extra_order: Vec<&str> = Vec::new();
             let mut extra_groups: HashMap<&str, Vec<usize>> = HashMap::new();
             for (idx, entry) in entries.iter().enumerate() {
-                if matches!(entry.display, Display::Furnace(_)) || !entry.fits(grid_lim, grid_lim)
-                {
+                if matches!(entry.display, Display::Furnace(_)) || !entry.fits(grid_lim, grid_lim) {
                     continue;
                 }
                 if seen_global.contains(&idx) {
@@ -421,6 +531,115 @@ impl Game<'_> {
         groups
     }
 
+    fn crafting_tab_groups(&mut self, tab_idx: usize) -> Vec<Vec<usize>> {
+        if self.legacy_crafting.promoted_tab != Some((tab_idx, self.craft_size)) {
+            self.legacy_crafting.promoted_tab = Some((tab_idx, self.craft_size));
+            self.legacy_crafting.promoted_entries.clear();
+        }
+        let base = self.raw_crafting_tab_groups(tab_idx);
+        let counts = self.crafting_available_counts();
+        let mut promoted = std::mem::take(&mut self.legacy_crafting.promoted_entries);
+        let sorted = promote_and_sort_groups(base, &mut promoted, |idx| {
+            self.is_recipe_craftable(idx, &counts)
+        });
+        self.legacy_crafting.promoted_entries = promoted;
+        sorted
+    }
+
+    fn is_recipe_craftable(&self, entry_idx: usize, counts: &HashMap<String, u32>) -> bool {
+        let Some(entry) = self
+            .recipe_ui
+            .book
+            .as_ref()
+            .and_then(|b| b.entries.get(entry_idx))
+        else {
+            return false;
+        };
+        let mut rem = counts.clone();
+        match &entry.display {
+            &Display::Shaped {
+                width,
+                height,
+                cells: ref recipe_cells,
+            } => {
+                for r in 0..height.min(3) {
+                    for c in 0..width.min(3) {
+                        if let Some(Some(ing)) = recipe_cells.get(r * width + c)
+                            && take_matching_ingredient(ing, &mut rem).is_none()
+                        {
+                            return false;
+                        }
+                    }
+                }
+                true
+            }
+            Display::Shapeless(list) => {
+                let grid_cols = if self.craft_size == 3 { 3 } else { 2 };
+                list.iter()
+                    .take(grid_cols * grid_cols)
+                    .all(|ing| take_matching_ingredient(ing, &mut rem).is_some())
+            }
+            Display::Furnace(_) => false,
+        }
+    }
+
+    pub(super) fn sync_legacy_crafting_session(&mut self) {
+        let active_mode = if self.legacy_crafting_open() {
+            Some((TabFilter::Crafting, self.craft_size))
+        } else if self.legacy_stonecutter_open() {
+            Some((TabFilter::Stonecutter, 0))
+        } else if self.legacy_merchant_open() {
+            Some((TabFilter::Merchant, 0))
+        } else {
+            None
+        };
+        if active_mode != self.legacy_crafting.active_session {
+            self.legacy_crafting.clear_active_session();
+            self.legacy_crafting.active_session = active_mode;
+            match active_mode {
+                Some((TabFilter::Crafting, _)) => {
+                    self.legacy_crafting.strip_offset = 0;
+                    self.legacy_crafting.selected_slot = 0;
+                    self.legacy_crafting.variant_index = 0;
+                    self.legacy_crafting.variant_offset = 0;
+                }
+                Some((TabFilter::Stonecutter, _)) => {
+                    self.legacy_crafting.stone_offset = 0;
+                    self.legacy_crafting.stone_selected = 0;
+                    self.legacy_crafting.stone_variant = 0;
+                    self.legacy_crafting.stone_variant_offset = 0;
+                }
+                Some((TabFilter::Merchant, _)) => {
+                    self.legacy_crafting.merchant_offset = 0;
+                    self.legacy_crafting.merchant_selected = 0;
+                }
+                None => {}
+            }
+        }
+        if matches!(active_mode, Some((TabFilter::Crafting, _))) && !self.legacy_crafting.tab_picked
+        {
+            self.ensure_book();
+            if self
+                .recipe_ui
+                .book
+                .as_ref()
+                .is_some_and(|b| !b.entries.is_empty())
+            {
+                self.legacy_crafting.tab_picked = true;
+                let counts = self.crafting_available_counts();
+                let chosen = (0..raw_crafting_tabs().len())
+                    .find(|&t| {
+                        self.raw_crafting_tab_groups(t)
+                            .iter()
+                            .flatten()
+                            .any(|&idx| self.is_recipe_craftable(idx, &counts))
+                    })
+                    .unwrap_or(0);
+                self.legacy_crafting.tab = chosen;
+            }
+        }
+    }
+
     fn recipe_craftable_and_grid(
         &self,
         entry_idx: usize,
@@ -443,13 +662,8 @@ impl Game<'_> {
         let resolve_cell = |ing: &horizon_client::crafting::Ingredient,
                             rem: &mut HashMap<String, u32>|
          -> (Option<ItemStack>, bool) {
-            for cand in &ing.order {
-                if let Some(c) = rem.get_mut(cand.as_str())
-                    && *c > 0
-                {
-                    *c -= 1;
-                    return (Some(ItemStack::new(cand, 1)), false);
-                }
+            if let Some(matched) = take_matching_ingredient(ing, rem) {
+                return (Some(ItemStack::new(matched, 1)), false);
             }
             let shown = if ing.order.is_empty() {
                 None
@@ -536,7 +750,14 @@ impl Game<'_> {
                 u32::MAX,
             );
             let (ref st, can) = variants[other];
-            self.draw_legacy_item_in_box(batch, st, sx, sy + 27.0, 27.0, if can { 1.0 } else { 0.5 });
+            self.draw_legacy_item_in_box(
+                batch,
+                st,
+                sx,
+                sy + 27.0,
+                27.0,
+                if can { 1.0 } else { 0.5 },
+            );
             if self.cursor.0 >= sx
                 && self.cursor.0 < sx + 27.0
                 && self.cursor.1 >= sy + 27.0
@@ -637,19 +858,53 @@ impl Game<'_> {
         let tw = 324.0;
         // Sunken 5px LCE scrollbar groove (`#373737` top/left shadow, `#8B8B8B` track, `#FFFFFF` bottom/right).
         batch.fill(atlas, tx, ty, tw, 5.0, rgba(55, 55, 55, 255));
-        batch.fill(atlas, tx + 1.0, ty + 1.0, tw - 1.0, 4.0, rgba(255, 255, 255, 255));
-        batch.fill(atlas, tx + 1.0, ty + 1.0, tw - 2.0, 3.0, rgba(139, 139, 139, 255));
+        batch.fill(
+            atlas,
+            tx + 1.0,
+            ty + 1.0,
+            tw - 1.0,
+            4.0,
+            rgba(255, 255, 255, 255),
+        );
+        batch.fill(
+            atlas,
+            tx + 1.0,
+            ty + 1.0,
+            tw - 2.0,
+            3.0,
+            rgba(139, 139, 139, 255),
+        );
         let inner_w = tw - 2.0;
         let thumb_w = ((12.0 / total as f32) * inner_w)
             .round()
             .clamp(18.0, inner_w);
         let max_off = (total - 12) as f32;
-        let thumb_x = tx
-            + 1.0
-            + ((offset.min(total - 12) as f32 / max_off) * (inner_w - thumb_w)).round();
-        batch.fill(atlas, thumb_x, ty + 1.0, thumb_w, 1.0, rgba(245, 245, 245, 255));
-        batch.fill(atlas, thumb_x, ty + 2.0, thumb_w, 1.0, rgba(198, 198, 198, 255));
-        batch.fill(atlas, thumb_x, ty + 3.0, thumb_w, 1.0, rgba(85, 85, 85, 255));
+        let thumb_x =
+            tx + 1.0 + ((offset.min(total - 12) as f32 / max_off) * (inner_w - thumb_w)).round();
+        batch.fill(
+            atlas,
+            thumb_x,
+            ty + 1.0,
+            thumb_w,
+            1.0,
+            rgba(245, 245, 245, 255),
+        );
+        batch.fill(
+            atlas,
+            thumb_x,
+            ty + 2.0,
+            thumb_w,
+            1.0,
+            rgba(198, 198, 198, 255),
+        );
+        batch.fill(
+            atlas,
+            thumb_x,
+            ty + 3.0,
+            thumb_w,
+            1.0,
+            rgba(85, 85, 85, 255),
+        );
     }
 
     fn draw_legacy_strip_chevrons(
@@ -695,7 +950,39 @@ impl Game<'_> {
         );
     }
 
+    fn arm_legacy_hold_craft(&mut self, filter: TabFilter) {
+        if !self.pad_synthetic_input() && !self.has_shift_down() {
+            self.legacy_crafting.hold = Some((filter, std::time::Instant::now(), false, 0));
+        }
+    }
+
+    fn tick_legacy_hold_craft(&mut self, filter: TabFilter) {
+        if !self
+            .physical_buttons
+            .contains(&winit::event::MouseButton::Left)
+            || self.pad_synthetic_input()
+        {
+            self.legacy_crafting.hold = None;
+            return;
+        }
+        let Some((held_filter, since, repeating, repeats)) = self.legacy_crafting.hold else {
+            return;
+        };
+        if held_filter != filter {
+            self.legacy_crafting.hold = None;
+            return;
+        }
+        let now = std::time::Instant::now();
+        let wait = super::pad_menu::fast_craft_interval(repeating, repeats);
+        if now.duration_since(since).as_secs_f32() >= wait {
+            self.legacy_crafting.hold = Some((filter, now, true, repeats.saturating_add(1)));
+            let _ = self.pad_legacy_crafting_button(horizon_client::gamepad::Button::South);
+        }
+    }
+
     pub(super) fn draw_legacy_crafting(&mut self, batch: &mut HudBatch) {
+        self.sync_legacy_crafting_session();
+        self.tick_legacy_hold_craft(TabFilter::Crafting);
         self.ensure_book();
         let tabs = raw_crafting_tabs();
         if tabs.is_empty() {
@@ -817,10 +1104,8 @@ impl Game<'_> {
             let sx = ox + 12.0 + i as f32 * 27.0;
             let sy = oy + 38.0;
             self.legacy_slot_box(batch, sx, sy, 27.0);
-            let is_focused = i == sel_slot
-                && groups
-                    .get(strip_offset + i)
-                    .is_some_and(|g| !g.is_empty());
+            let is_focused =
+                i == sel_slot && groups.get(strip_offset + i).is_some_and(|g| !g.is_empty());
             if !is_focused
                 && let Some(group) = groups.get(strip_offset + i)
                 && let Some(&first_idx) = group.first()
@@ -832,7 +1117,14 @@ impl Game<'_> {
             {
                 let result = entry.result.clone();
                 let (can, _, _) = self.recipe_craftable_and_grid(first_idx, &counts);
-                self.draw_legacy_item_in_box(batch, &result, sx, sy, 27.0, if can { 1.0 } else { 0.5 });
+                self.draw_legacy_item_in_box(
+                    batch,
+                    &result,
+                    sx,
+                    sy,
+                    27.0,
+                    if can { 1.0 } else { 0.5 },
+                );
                 if self.cursor.0 >= sx
                     && self.cursor.0 < sx + 27.0
                     && self.cursor.1 >= sy
@@ -844,7 +1136,10 @@ impl Game<'_> {
         }
 
         // Compute focused recipe entry from selected group & variant popout.
-        let focused_group = groups.get(strip_offset + sel_slot).cloned().unwrap_or_default();
+        let focused_group = groups
+            .get(strip_offset + sel_slot)
+            .cloned()
+            .unwrap_or_default();
         let variant_count = focused_group.len();
         if variant_count > 0 {
             self.legacy_crafting.variant_index %= variant_count;
@@ -859,7 +1154,9 @@ impl Game<'_> {
         let cur_var = self.legacy_crafting.variant_index;
         let var_off = self.legacy_crafting.variant_offset;
         let focused_entry_idx = if variant_count > 0 {
-            focused_group.get(Self::focused_variant_pos(variant_count, cur_var, var_off)).copied()
+            focused_group
+                .get(Self::focused_variant_pos(variant_count, cur_var, var_off))
+                .copied()
         } else {
             None
         };
@@ -884,7 +1181,14 @@ impl Game<'_> {
                 let atlas = &self.gui.atlas;
                 let rw = HudBatch::text_width(atlas, &result_name);
                 let tx = ox + 9.0 + ((163.0 - rw) * 0.5).floor();
-                batch.text(atlas, &result_name, tx, oy + 114.0, rgba(64, 64, 64, 255), false);
+                batch.text(
+                    atlas,
+                    &result_name,
+                    tx,
+                    oy + 114.0,
+                    rgba(64, 64, 64, 255),
+                    false,
+                );
             }
             let grid_n = if self.craft_size == 3 { 3 } else { 2 };
             let grid_x0 = if grid_n == 3 { ox + 21.0 } else { ox + 32.5 };
@@ -1001,7 +1305,8 @@ impl Game<'_> {
             }
             let sx = ox + 12.0 + sel_slot as f32 * 27.0;
             let sy = oy + 38.0;
-            if let Some(pop_tip) = self.draw_variant_popout(batch, sx, sy, &variants, cur_var, var_off)
+            if let Some(pop_tip) =
+                self.draw_variant_popout(batch, sx, sy, &variants, cur_var, var_off)
             {
                 hovered_stack = Some(pop_tip);
             }
@@ -1058,6 +1363,8 @@ impl Game<'_> {
         if !self.legacy_crafting_open() {
             return false;
         }
+        self.sync_legacy_crafting_session();
+        self.legacy_crafting.hold = None;
         let Some(batch) = self.gui_scale() else {
             return true;
         };
@@ -1120,14 +1427,19 @@ impl Game<'_> {
         // 3. Variant popout top/bottom click on selected group.
         let sx = ox + 12.0 + sel_slot as f32 * 27.0;
         let sy = oy + 38.0;
-        let focused_group = groups.get(strip_offset + sel_slot).cloned().unwrap_or_default();
+        let focused_group = groups
+            .get(strip_offset + sel_slot)
+            .cloned()
+            .unwrap_or_default();
         let len = focused_group.len();
         if !right && len >= 2 && mx >= sx && mx < sx + 27.0 {
             if len >= 3 && my >= sy - 27.0 && my < sy {
                 if self.legacy_crafting.variant_offset == -1 {
-                    let pos = Self::focused_variant_pos(len, self.legacy_crafting.variant_index, -1);
+                    let pos =
+                        Self::focused_variant_pos(len, self.legacy_crafting.variant_index, -1);
                     if let Some(&entry_idx) = focused_group.get(pos) {
                         self.execute_craft_entry(entry_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Crafting);
                     }
                 } else {
                     self.legacy_crafting.variant_offset = -1;
@@ -1140,6 +1452,7 @@ impl Game<'_> {
                     let pos = Self::focused_variant_pos(len, self.legacy_crafting.variant_index, 1);
                     if let Some(&entry_idx) = focused_group.get(pos) {
                         self.execute_craft_entry(entry_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Crafting);
                     }
                 } else {
                     self.legacy_crafting.variant_offset = 1;
@@ -1170,7 +1483,8 @@ impl Game<'_> {
             let gy = oy + 38.0;
             if mx >= gx && mx < gx + 27.0 && my >= gy && my < gy + 27.0 {
                 if right && i == sel_slot && len > 1 {
-                    self.legacy_crafting.variant_index = (self.legacy_crafting.variant_index + 1) % len;
+                    self.legacy_crafting.variant_index =
+                        (self.legacy_crafting.variant_index + 1) % len;
                     self.legacy_crafting.variant_offset = 0;
                     self.audio.play_button_click();
                     return true;
@@ -1184,8 +1498,11 @@ impl Game<'_> {
                     if self.legacy_crafting.variant_offset != 0 {
                         self.legacy_crafting.variant_offset = 0;
                         self.audio.play_button_click();
-                    } else if let Some(&entry_idx) = focused_group.get(self.legacy_crafting.variant_index % len.max(1)) {
+                    } else if let Some(&entry_idx) =
+                        focused_group.get(self.legacy_crafting.variant_index % len.max(1))
+                    {
                         self.execute_craft_entry(entry_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Crafting);
                     }
                 }
                 return true;
@@ -1207,6 +1524,7 @@ impl Game<'_> {
             );
             if let Some(&entry_idx) = focused_group.get(pos) {
                 self.execute_craft_entry(entry_idx, self.has_shift_down());
+                self.arm_legacy_hold_craft(TabFilter::Crafting);
             }
             return true;
         }
@@ -1222,6 +1540,7 @@ impl Game<'_> {
         if d == 0.0 {
             return;
         }
+        self.sync_legacy_crafting_session();
         self.ensure_book();
         let groups = self.crafting_tab_groups(self.legacy_crafting.tab);
         let max_offset = groups.len().saturating_sub(12);
@@ -1239,7 +1558,10 @@ impl Game<'_> {
     // LegacyStonecutterScreen (`348x215`, 1:1 `LegacyStonecutterScreen.java`)
     // =========================================================================
 
-    fn stonecutting_groups(&self, counts: &HashMap<String, u32>) -> Vec<(String, Vec<(usize, bool)>)> {
+    fn raw_stonecutting_groups(
+        &self,
+        counts: &HashMap<String, u32>,
+    ) -> Vec<(String, Vec<(usize, bool)>)> {
         let recipes = &self.stations().recipes.stonecutting;
         let mut by_input: HashMap<String, Vec<usize>> = HashMap::new();
         let mut order: Vec<String> = Vec::new();
@@ -1277,10 +1599,23 @@ impl Game<'_> {
         out
     }
 
+    fn stonecutting_groups(
+        &mut self,
+        counts: &HashMap<String, u32>,
+    ) -> Vec<(String, Vec<(usize, bool)>)> {
+        let base = self.raw_stonecutting_groups(counts);
+        let mut promoted = std::mem::take(&mut self.legacy_crafting.promoted_stone);
+        let sorted = promote_and_sort_stonecutting(base, &mut promoted);
+        self.legacy_crafting.promoted_stone = promoted;
+        sorted
+    }
+
     pub(super) fn draw_legacy_stonecutter(&mut self, batch: &mut HudBatch) -> bool {
         if !self.legacy_stonecutter_open() {
             return false;
         }
+        self.sync_legacy_crafting_session();
+        self.tick_legacy_hold_craft(TabFilter::Stonecutter);
         let Some((ox, oy)) = self.legacy_screen_origin(batch) else {
             return false;
         };
@@ -1297,9 +1632,9 @@ impl Game<'_> {
         }
 
         self.legacy_panel(batch, ox, oy, 348.0, 215.0);
-        let title = self
-            .remote_menu_title()
-            .unwrap_or_else(|| Text::literal(self.translate("container.stonecutter", "Stonecutter")));
+        let title = self.remote_menu_title().unwrap_or_else(|| {
+            Text::literal(self.translate("container.stonecutter", "Stonecutter"))
+        });
         super::screen_info::name_container(|| title.plain());
         {
             let atlas = &self.gui.atlas;
@@ -1337,8 +1672,10 @@ impl Game<'_> {
             self.legacy_crafting.stone_variant %= len;
             let max_off = if len >= 2 { 1 } else { 0 };
             let min_off = if len >= 3 { -1 } else { 0 };
-            self.legacy_crafting.stone_variant_offset =
-                self.legacy_crafting.stone_variant_offset.clamp(min_off, max_off);
+            self.legacy_crafting.stone_variant_offset = self
+                .legacy_crafting
+                .stone_variant_offset
+                .clamp(min_off, max_off);
         } else {
             self.legacy_crafting.stone_variant = 0;
             self.legacy_crafting.stone_variant_offset = 0;
@@ -1362,7 +1699,14 @@ impl Game<'_> {
                 && let Some(&(r_idx, can)) = group.first()
             {
                 let res = recipes[r_idx].result.clone();
-                self.draw_legacy_item_in_box(batch, &res, sx, sy, 27.0, if can { 1.0 } else { 0.5 });
+                self.draw_legacy_item_in_box(
+                    batch,
+                    &res,
+                    sx,
+                    sy,
+                    27.0,
+                    if can { 1.0 } else { 0.5 },
+                );
                 if self.cursor.0 >= sx
                     && self.cursor.0 < sx + 27.0
                     && self.cursor.1 >= sy
@@ -1447,7 +1791,12 @@ impl Game<'_> {
 
         let variants: Vec<(ItemStack, bool)> = focused_group
             .iter()
-            .map(|&(r_idx, can)| (self.stations().recipes.stonecutting[r_idx].result.clone(), can))
+            .map(|&(r_idx, can)| {
+                (
+                    self.stations().recipes.stonecutting[r_idx].result.clone(),
+                    can,
+                )
+            })
             .collect();
 
         // Bottom-right `16x16` player inventory recess (`176, 103, 163x105`).
@@ -1485,7 +1834,8 @@ impl Game<'_> {
         if !variants.is_empty() {
             let sx = ox + 12.0 + sel_slot as f32 * 27.0;
             let sy = oy + 38.0;
-            if let Some(pop_tip) = self.draw_variant_popout(batch, sx, sy, &variants, cur_var, var_off)
+            if let Some(pop_tip) =
+                self.draw_variant_popout(batch, sx, sy, &variants, cur_var, var_off)
             {
                 hovered_stack = Some(pop_tip);
             }
@@ -1502,7 +1852,13 @@ impl Game<'_> {
     }
 
     fn execute_stonecut(&mut self, recipe_idx: usize, craft_all: bool) {
-        let Some(recipe) = self.stations().recipes.stonecutting.get(recipe_idx).cloned() else {
+        let Some(recipe) = self
+            .stations()
+            .recipes
+            .stonecutting
+            .get(recipe_idx)
+            .cloned()
+        else {
             return;
         };
         let input_in_slot = self
@@ -1572,6 +1928,8 @@ impl Game<'_> {
         if !self.legacy_stonecutter_open() {
             return false;
         }
+        self.sync_legacy_crafting_session();
+        self.legacy_crafting.hold = None;
         let Some(batch) = self.gui_scale() else {
             return true;
         };
@@ -1619,9 +1977,11 @@ impl Game<'_> {
         if !right && len >= 2 && mx >= sx && mx < sx + 27.0 {
             if len >= 3 && my >= sy - 27.0 && my < sy {
                 if self.legacy_crafting.stone_variant_offset == -1 {
-                    let pos = Self::focused_variant_pos(len, self.legacy_crafting.stone_variant, -1);
+                    let pos =
+                        Self::focused_variant_pos(len, self.legacy_crafting.stone_variant, -1);
                     if let Some(&(r_idx, true)) = focused_group.get(pos) {
                         self.execute_stonecut(r_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Stonecutter);
                     }
                 } else {
                     self.legacy_crafting.stone_variant_offset = -1;
@@ -1634,6 +1994,7 @@ impl Game<'_> {
                     let pos = Self::focused_variant_pos(len, self.legacy_crafting.stone_variant, 1);
                     if let Some(&(r_idx, true)) = focused_group.get(pos) {
                         self.execute_stonecut(r_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Stonecutter);
                     }
                 } else {
                     self.legacy_crafting.stone_variant_offset = 1;
@@ -1683,6 +2044,7 @@ impl Game<'_> {
                         focused_group.get(self.legacy_crafting.stone_variant % len.max(1))
                     {
                         self.execute_stonecut(r_idx, self.has_shift_down());
+                        self.arm_legacy_hold_craft(TabFilter::Stonecutter);
                     }
                 }
                 return true;
@@ -1704,6 +2066,7 @@ impl Game<'_> {
             );
             if let Some(&(r_idx, true)) = focused_group.get(pos) {
                 self.execute_stonecut(r_idx, self.has_shift_down());
+                self.arm_legacy_hold_craft(TabFilter::Stonecutter);
             }
             return true;
         }
@@ -1719,6 +2082,7 @@ impl Game<'_> {
         if d == 0.0 {
             return;
         }
+        self.sync_legacy_crafting_session();
         let counts = self.stonecutter_available_counts();
         let groups = self.stonecutting_groups(&counts);
         let max_offset = groups.len().saturating_sub(12);
@@ -1736,7 +2100,11 @@ impl Game<'_> {
     // LegacyMerchantScreen (`294x181`, 1:1 `LegacyMerchantScreen.java`)
     // =========================================================================
 
-    fn merchant_offer_craftable(&self, offer: &MerchantOffer, counts: &HashMap<String, u32>) -> (bool, bool, bool) {
+    fn merchant_offer_craftable(
+        &self,
+        offer: &MerchantOffer,
+        counts: &HashMap<String, u32>,
+    ) -> (bool, bool, bool) {
         let a_ok = counts
             .get(&*offer.cost_a(self.items()).item)
             .copied()
@@ -1783,7 +2151,11 @@ impl Game<'_> {
         if !self.can_fit_in_player_inv(&offer.result) && !frees_inv_slot {
             return;
         }
-        let reps = if trade_all && self.remote.is_none() { 64 } else { 1 };
+        let reps = if trade_all && self.remote.is_none() {
+            64
+        } else {
+            1
+        };
         let mut traded = false;
         for step in 0..reps {
             self.try_move_items(offer_idx);
@@ -1803,10 +2175,26 @@ impl Game<'_> {
         }
     }
 
+    fn merchant_offer_order(
+        &mut self,
+        offers: &[MerchantOffer],
+        counts: &HashMap<String, u32>,
+    ) -> Vec<usize> {
+        let mut promoted = std::mem::take(&mut self.legacy_crafting.promoted_merchant);
+        let order = promote_and_sort_merchant_offers(offers.len(), &mut promoted, |idx| {
+            let offer = &offers[idx];
+            !offer.out_of_stock() && !self.merchant_offer_craftable(offer, counts).2
+        });
+        self.legacy_crafting.promoted_merchant = promoted;
+        order
+    }
+
     pub(super) fn draw_legacy_merchant(&mut self, batch: &mut HudBatch) -> bool {
         if !self.legacy_merchant_open() {
             return false;
         }
+        self.sync_legacy_crafting_session();
+        self.tick_legacy_hold_craft(TabFilter::Merchant);
         let Some((ox, oy)) = self.legacy_screen_origin(batch) else {
             return false;
         };
@@ -1855,7 +2243,10 @@ impl Game<'_> {
             }
         });
         let title_str = if progress && level > 0 && level <= 5 {
-            let lvl_name = self.translate(&format!("merchant.level.{level}"), &format!("Level {level}"));
+            let lvl_name = self.translate(
+                &format!("merchant.level.{level}"),
+                &format!("Level {level}"),
+            );
             format!("{base_title} - {lvl_name}")
         } else {
             base_title
@@ -1875,15 +2266,18 @@ impl Game<'_> {
         }
 
         let counts = self.merchant_available_counts();
-        let max_offset = offers.len().saturating_sub(10);
+        let order = self.merchant_offer_order(&offers, &counts);
+        let max_offset = order.len().saturating_sub(10);
         let offset = self.legacy_crafting.merchant_offset.min(max_offset);
         self.legacy_crafting.merchant_offset = offset;
         let selected = self
             .legacy_crafting
             .merchant_selected
-            .min(offers.len().saturating_sub(offset).min(10).saturating_sub(1));
+            .min(order.len().saturating_sub(offset).min(10).saturating_sub(1));
         self.legacy_crafting.merchant_selected = selected;
-        let sel_offer = offers.get(offset + selected);
+        let sel_offer = order
+            .get(offset + selected)
+            .and_then(|&idx| offers.get(idx));
 
         // Villager XP progress bar (`243x6` at `(25.5, 28)` when `level < 5`).
         if progress && level < 5 {
@@ -1944,7 +2338,7 @@ impl Game<'_> {
                 u32::MAX,
             );
         }
-        if offset + 10 < offers.len() {
+        if offset + 10 < order.len() {
             blit_sprite(
                 batch,
                 &self.gui.atlas,
@@ -1963,7 +2357,7 @@ impl Game<'_> {
         for i in 0..10 {
             let sx = ox + 13.0 + i as f32 * 27.0;
             let sy = oy + 44.0;
-            if let Some(offer) = offers.get(offset + i) {
+            if let Some(offer) = order.get(offset + i).and_then(|&idx| offers.get(idx)) {
                 let (_, _, warn_all) = self.merchant_offer_craftable(offer, &counts);
                 let out_of_stock = offer.out_of_stock();
                 self.legacy_icon_holder(batch, sx, sy, 27.0, warn_all && !out_of_stock, false);
@@ -2129,6 +2523,8 @@ impl Game<'_> {
         if !self.legacy_merchant_open() {
             return false;
         }
+        self.sync_legacy_crafting_session();
+        self.legacy_crafting.hold = None;
         let Some(batch) = self.gui_scale() else {
             return true;
         };
@@ -2144,12 +2540,14 @@ impl Game<'_> {
             return false;
         };
         let (mx, my) = self.cursor;
-        let max_offset = offers.len().saturating_sub(10);
+        let counts = self.merchant_available_counts();
+        let order = self.merchant_offer_order(&offers, &counts);
+        let max_offset = order.len().saturating_sub(10);
         let offset = self.legacy_crafting.merchant_offset.min(max_offset);
         let selected = self
             .legacy_crafting
             .merchant_selected
-            .min(offers.len().saturating_sub(offset).min(10).saturating_sub(1));
+            .min(order.len().saturating_sub(offset).min(10).saturating_sub(1));
 
         // 1. Scroll arrows.
         if !right && my >= oy + 44.0 && my < oy + 71.0 {
@@ -2158,7 +2556,7 @@ impl Game<'_> {
                 self.audio.play_button_click();
                 return true;
             }
-            if offset + 10 < offers.len() && mx >= ox + 281.0 && mx < ox + 294.0 {
+            if offset + 10 < order.len() && mx >= ox + 281.0 && mx < ox + 294.0 {
                 self.legacy_crafting.merchant_offset = offset + 1;
                 self.audio.play_button_click();
                 return true;
@@ -2174,14 +2572,15 @@ impl Game<'_> {
                 && mx < sx + 27.0
                 && my >= sy
                 && my < sy + 27.0
-                && offset + i < offers.len()
+                && let Some(&real_idx) = order.get(offset + i)
             {
                 if i != selected {
                     self.legacy_crafting.merchant_selected = i;
-                    self.try_move_items(offset + i);
+                    self.try_move_items(real_idx);
                     self.audio.play_button_click();
                 } else {
-                    self.execute_merchant_trade(offset + i, self.has_shift_down());
+                    self.execute_merchant_trade(real_idx, self.has_shift_down());
+                    self.arm_legacy_hold_craft(TabFilter::Merchant);
                 }
                 return true;
             }
@@ -2193,9 +2592,10 @@ impl Game<'_> {
             && mx < ox + 113.0
             && my >= oy + 130.0
             && my < oy + 157.0
-            && offset + selected < offers.len()
+            && let Some(&real_idx) = order.get(offset + selected)
         {
-            self.execute_merchant_trade(offset + selected, self.has_shift_down());
+            self.execute_merchant_trade(real_idx, self.has_shift_down());
+            self.arm_legacy_hold_craft(TabFilter::Merchant);
             return true;
         }
 
@@ -2210,6 +2610,7 @@ impl Game<'_> {
         if d == 0.0 {
             return;
         }
+        self.sync_legacy_crafting_session();
         let len = self
             .station
             .as_ref()
@@ -2240,12 +2641,16 @@ impl Game<'_> {
         let PhysicalKey::Code(key) = event.physical_key else {
             return false;
         };
+        self.sync_legacy_crafting_session();
         match mode {
             TabFilter::Crafting => {
                 self.ensure_book();
                 let tabs = raw_crafting_tabs();
                 let groups = self.crafting_tab_groups(self.legacy_crafting.tab);
-                let visible = groups.len().saturating_sub(self.legacy_crafting.strip_offset).min(12);
+                let visible = groups
+                    .len()
+                    .saturating_sub(self.legacy_crafting.strip_offset)
+                    .min(12);
                 match key {
                     KeyCode::PageUp | KeyCode::BracketLeft if !tabs.is_empty() => {
                         self.legacy_crafting.tab =
@@ -2300,10 +2705,17 @@ impl Game<'_> {
                     }
                     KeyCode::ArrowUp | KeyCode::ArrowDown => {
                         let focused_len = groups
-                            .get(self.legacy_crafting.strip_offset + self.legacy_crafting.selected_slot)
+                            .get(
+                                self.legacy_crafting.strip_offset
+                                    + self.legacy_crafting.selected_slot,
+                            )
                             .map_or(0, Vec::len);
                         if focused_len > 1 {
-                            let step = if key == KeyCode::ArrowUp { focused_len - 1 } else { 1 };
+                            let step = if key == KeyCode::ArrowUp {
+                                focused_len - 1
+                            } else {
+                                1
+                            };
                             self.legacy_crafting.variant_index =
                                 (self.legacy_crafting.variant_index + step) % focused_len;
                             self.legacy_crafting.variant_offset = 0;
@@ -2312,9 +2724,9 @@ impl Game<'_> {
                         true
                     }
                     KeyCode::Enter | KeyCode::NumpadEnter => {
-                        if let Some(group) = groups
-                            .get(self.legacy_crafting.strip_offset + self.legacy_crafting.selected_slot)
-                            && !group.is_empty()
+                        if let Some(group) = groups.get(
+                            self.legacy_crafting.strip_offset + self.legacy_crafting.selected_slot,
+                        ) && !group.is_empty()
                         {
                             let pos = Self::focused_variant_pos(
                                 group.len(),
@@ -2333,7 +2745,10 @@ impl Game<'_> {
             TabFilter::Stonecutter => {
                 let counts = self.stonecutter_available_counts();
                 let groups = self.stonecutting_groups(&counts);
-                let visible = groups.len().saturating_sub(self.legacy_crafting.stone_offset).min(12);
+                let visible = groups
+                    .len()
+                    .saturating_sub(self.legacy_crafting.stone_offset)
+                    .min(12);
                 match key {
                     KeyCode::ArrowLeft if !groups.is_empty() => {
                         if self.legacy_crafting.stone_selected > 0 {
@@ -2367,10 +2782,17 @@ impl Game<'_> {
                     }
                     KeyCode::ArrowUp | KeyCode::ArrowDown => {
                         let focused_len = groups
-                            .get(self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected)
+                            .get(
+                                self.legacy_crafting.stone_offset
+                                    + self.legacy_crafting.stone_selected,
+                            )
                             .map_or(0, |(_, g)| g.len());
                         if focused_len > 1 {
-                            let step = if key == KeyCode::ArrowUp { focused_len - 1 } else { 1 };
+                            let step = if key == KeyCode::ArrowUp {
+                                focused_len - 1
+                            } else {
+                                1
+                            };
                             self.legacy_crafting.stone_variant =
                                 (self.legacy_crafting.stone_variant + step) % focused_len;
                             self.legacy_crafting.stone_variant_offset = 0;
@@ -2378,9 +2800,9 @@ impl Game<'_> {
                         true
                     }
                     KeyCode::Enter | KeyCode::NumpadEnter => {
-                        if let Some((_, group)) = groups
-                            .get(self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected)
-                            && !group.is_empty()
+                        if let Some((_, group)) = groups.get(
+                            self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected,
+                        ) && !group.is_empty()
                         {
                             let pos = Self::focused_variant_pos(
                                 group.len(),
@@ -2397,12 +2819,17 @@ impl Game<'_> {
                 }
             }
             TabFilter::Merchant => {
-                let len = self
+                let offers = self
                     .station
                     .as_ref()
                     .and_then(|s| s.merchant.as_ref())
-                    .map_or(0, |m| m.session.offers.len());
-                let visible = len.saturating_sub(self.legacy_crafting.merchant_offset).min(10);
+                    .map_or_else(Vec::new, |m| m.session.offers.clone());
+                let counts = self.merchant_available_counts();
+                let order = self.merchant_offer_order(&offers, &counts);
+                let len = order.len();
+                let visible = len
+                    .saturating_sub(self.legacy_crafting.merchant_offset)
+                    .min(10);
                 match key {
                     KeyCode::ArrowLeft if len > 0 => {
                         if self.legacy_crafting.merchant_selected > 0 {
@@ -2421,9 +2848,12 @@ impl Game<'_> {
                         true
                     }
                     KeyCode::Enter | KeyCode::NumpadEnter if len > 0 => {
-                        let idx = (self.legacy_crafting.merchant_offset + self.legacy_crafting.merchant_selected)
+                        let idx = (self.legacy_crafting.merchant_offset
+                            + self.legacy_crafting.merchant_selected)
                             .min(len - 1);
-                        self.execute_merchant_trade(idx, self.has_shift_down());
+                        if let Some(&real_idx) = order.get(idx) {
+                            self.execute_merchant_trade(real_idx, self.has_shift_down());
+                        }
                         true
                     }
                     _ => false,
@@ -2480,6 +2910,7 @@ impl Game<'_> {
         if self.screen != Screen::Inventory || !self.use_legacy_gui() {
             return false;
         }
+        self.sync_legacy_crafting_session();
         if self.legacy_crafting_open() {
             self.ensure_book();
             let tabs = raw_crafting_tabs();
@@ -2577,7 +3008,9 @@ impl Game<'_> {
                 Button::DPadLeft | Button::DPadRight => true,
                 Button::DPadUp | Button::DPadDown => {
                     let focused_len = groups
-                        .get(self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected)
+                        .get(
+                            self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected,
+                        )
                         .map_or(0, |(_, g)| g.len());
                     if focused_len > 1 {
                         let step = if button == Button::DPadUp {
@@ -2593,9 +3026,9 @@ impl Game<'_> {
                     true
                 }
                 Button::South | Button::North | Button::West => {
-                    if let Some((_, group)) = groups
-                        .get(self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected)
-                        && !group.is_empty()
+                    if let Some((_, group)) = groups.get(
+                        self.legacy_crafting.stone_offset + self.legacy_crafting.stone_selected,
+                    ) && !group.is_empty()
                     {
                         let pos = Self::focused_variant_pos(
                             group.len(),
@@ -2611,11 +3044,14 @@ impl Game<'_> {
                 _ => false,
             }
         } else if self.legacy_merchant_open() {
-            let len = self
+            let offers = self
                 .station
                 .as_ref()
                 .and_then(|s| s.merchant.as_ref())
-                .map_or(0, |m| m.session.offers.len());
+                .map_or_else(Vec::new, |m| m.session.offers.clone());
+            let counts = self.merchant_available_counts();
+            let order = self.merchant_offer_order(&offers, &counts);
+            let len = order.len();
             match button {
                 Button::DPadLeft | Button::DPadUp | Button::DPadRight | Button::DPadDown => {
                     let back = matches!(button, Button::DPadLeft | Button::DPadUp);
@@ -2636,7 +3072,9 @@ impl Game<'_> {
                         let idx = (self.legacy_crafting.merchant_offset
                             + self.legacy_crafting.merchant_selected)
                             .min(len - 1);
-                        self.execute_merchant_trade(idx, !matches!(button, Button::South));
+                        if let Some(&real_idx) = order.get(idx) {
+                            self.execute_merchant_trade(real_idx, !matches!(button, Button::South));
+                        }
                     }
                     true
                 }
@@ -2645,5 +3083,66 @@ impl Game<'_> {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn craftable_groups_and_variants_promote_to_far_left_stably() {
+        // Planks group [oak=0, spruce=1, birch=2], Sticks [stick=3], Stairs [oak_stairs=4, birch_stairs=5]
+        let groups = vec![vec![0, 1, 2], vec![3], vec![4, 5]];
+        let mut promoted = Vec::new();
+        // Player only has birch planks -> birch_stairs (5) and sticks (3) craftable
+        let sorted = promote_and_sort_groups(groups, &mut promoted, |idx| matches!(idx, 3 | 5));
+        assert_eq!(sorted, vec![vec![3], vec![5, 4], vec![0, 1, 2]]);
+    }
+
+    #[test]
+    fn exhausting_ingredients_mid_visit_pins_active_recipe_and_appends_new_ones() {
+        let groups = vec![vec![0, 1, 2], vec![3], vec![4, 5]];
+        let mut promoted = Vec::new();
+        // Open with birch logs -> birch_planks (2) promoted in Planks group at slot 0.
+        let on_open = promote_and_sort_groups(groups.clone(), &mut promoted, |idx| idx == 2);
+        assert_eq!(on_open, vec![vec![2, 0, 1], vec![3], vec![4, 5]]);
+
+        // Last birch log crafted into birch planks: oak/birch logs gone, stick (3) and birch_stairs (5) now craftable.
+        // Slot 0 stays pinned on [2, 0, 1] so fast-crafting doesn't pull sticks underneath held A.
+        let after_craft =
+            promote_and_sort_groups(groups.clone(), &mut promoted, |idx| matches!(idx, 3 | 5));
+        assert_eq!(after_craft, vec![vec![2, 0, 1], vec![3], vec![5, 4]]);
+
+        // Reopening / switching tab clears promotions so uncraftable planks return after craftables.
+        promoted.clear();
+        let reopened = promote_and_sort_groups(groups, &mut promoted, |idx| matches!(idx, 3 | 5));
+        assert_eq!(reopened, vec![vec![3], vec![5, 4], vec![0, 1, 2]]);
+    }
+
+    #[test]
+    fn stonecutting_and_merchant_preserve_indices_and_pin_exhausted_trades() {
+        let mut stone_promoted = Vec::new();
+        let stone = vec![
+            ("cobble".to_owned(), vec![(0, false), (1, false)]),
+            ("andesite".to_owned(), vec![(2, false), (3, true)]),
+            ("granite".to_owned(), vec![(4, true)]),
+        ];
+        let sorted_stone = promote_and_sort_stonecutting(stone, &mut stone_promoted);
+        assert_eq!(sorted_stone[0].0, "andesite");
+        assert_eq!(sorted_stone[0].1, vec![(3, true), (2, false)]);
+        assert_eq!(sorted_stone[1].0, "granite");
+        assert_eq!(sorted_stone[2].0, "cobble");
+
+        let mut merchant_promoted = Vec::new();
+        // Offers 1 and 3 are affordable on open; 0 and 2 are locked/unaffordable.
+        let order_open =
+            promote_and_sort_merchant_offers(4, &mut merchant_promoted, |idx| matches!(idx, 1 | 3));
+        assert_eq!(order_open, vec![1, 3, 0, 2]);
+
+        // Offer 1 runs out of stock mid-hold while offer 2 becomes affordable -> offer 1 stays at slot 0.
+        let order_mid =
+            promote_and_sort_merchant_offers(4, &mut merchant_promoted, |idx| matches!(idx, 2 | 3));
+        assert_eq!(order_mid, vec![1, 3, 2, 0]);
     }
 }

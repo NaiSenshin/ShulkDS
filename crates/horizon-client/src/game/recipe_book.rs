@@ -298,9 +298,7 @@ impl Game<'_> {
             } else {
                 self.craft_size * self.craft_size
             };
-            let grid: Vec<_> = (0..cells)
-                .map(|k| self.slot_mut(100 + k).clone())
-                .collect();
+            let grid: Vec<_> = (0..cells).map(|k| self.slot_mut(100 + k).clone()).collect();
             let mut menu = Menu::new(if table {
                 Kind::Crafting
             } else {
@@ -564,7 +562,7 @@ impl Game<'_> {
             {
                 continue;
             }
-            let entries: Vec<(usize, bool)> = c
+            let mut entries: Vec<(usize, bool)> = c
                 .entries
                 .iter()
                 .filter(|&&i| selected(&book.entries[i]))
@@ -576,9 +574,15 @@ impl Game<'_> {
             let entries = if filtering {
                 entries.into_iter().filter(|e| e.1).collect()
             } else {
+                if self.shulkds.config.enabled {
+                    entries.sort_by_key(|&(_, can)| !can);
+                }
                 entries
             };
             buttons.push(Button { entries });
+        }
+        if self.shulkds.config.enabled && !filtering {
+            buttons.sort_by_key(|b| !b.craftable());
         }
         View { tabs, buttons }
     }
@@ -596,7 +600,7 @@ impl Game<'_> {
     }
     /// The green book button's top-left corner.
     fn book_button_pos(&self, book: BookType, ox: f32, batch: &HudBatch) -> (f32, f32) {
-        if self.use_legacy_gui() {
+        if self.use_legacy_inventory_layout() {
             let (_, oy) = self.inventory_origin(batch);
             return match book {
                 BookType::Crafting if self.craft_size == 2 => (ox + 137.0, oy + 77.5),
@@ -625,8 +629,7 @@ impl Game<'_> {
         (self.recipe_ui.time / SWAP_TICKS).floor() as usize
     }
     fn batch_for_size(&self) -> Option<HudBatch> {
-        let r = self.renderer.as_ref()?;
-        Some(HudBatch::new([r.config.width, r.config.height]))
+        self.gui_scale()
     }
 
     // ---- clicks ----
@@ -634,7 +637,7 @@ impl Game<'_> {
     /// A click while a screen with a recipe book is open; true when the book
     /// used it.
     pub(super) fn recipe_book_click(&mut self, right: bool) -> bool {
-        if self.use_legacy_gui() {
+        if self.use_legacy_inventory_layout() {
             return false;
         }
         let Some(book_type) = self.active_book() else {
@@ -863,6 +866,9 @@ impl Game<'_> {
     /// the search box registers itself as a field).
     pub(super) fn recipe_book_targets(&self) -> Vec<horizon_client::widgets::Target> {
         use horizon_client::widgets::{Kind, Target};
+        if self.use_legacy_inventory_layout() {
+            return Vec::new();
+        }
         let (Some(book_type), Some(batch)) = (self.active_book(), self.batch_for_size()) else {
             return Vec::new();
         };
@@ -1181,7 +1187,7 @@ impl Game<'_> {
 
     /// The book button, ghost recipe and the open book.
     pub(super) fn draw_recipe_book(&mut self, batch: &mut HudBatch) {
-        if self.use_legacy_gui() {
+        if self.use_legacy_inventory_layout() {
             return;
         }
         let Some(book_type) = self.active_book() else {

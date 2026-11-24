@@ -354,5 +354,18 @@
   "starling.mods.native.restart": "Перезапустить",
   "starling.mods.native.build_server": "Сервер сборки...",
   "starling.mods.native.out_of_date": "Сборка с %s сделана для прошлой установки Starling и больше не загружается. Соберите заново.",
-  "starling.mods.native.not_built_tip": "Установлен, но ещё не в игре: «Собрать» соберёт игру с ним на сервере сборки Starling."
+  "starling.mods.native.not_built_tip": "Установлен, но ещё не в игре: «Собрать» соберёт игру с ним на сервере сборки Starling.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Положение панели",
+  "horizon.extras.shulkds_hotbar.tooltip": "Выберите положение панели быстрого доступа: внизу нижнего экрана, вверху нижнего экрана или классически на верхнем экране.",
+  "horizon.extras.shulkds_classic_crafting": "Классический крафт",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Использовать классическую сетку 2x2 и 3x3 с книгой рецептов вместо консольного меню.",
+  "horizon.extras.shulkds_classic_inventory": "Классический инвентарь",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Открывать классический инвентарь выживания и творчества на верхнем экране по нажатию Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Автообновления",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Проверять релизы на GitHub при запуске ShulkDS и предлагать установку обновлений.",
+  "horizon.shulkds.hotbar.bottom": "Нижний экран (Низ)",
+  "horizon.shulkds.hotbar.top": "Нижний экран (Верх)",
+  "horizon.shulkds.hotbar.classic": "Верхний экран (Классика)",
+  "horizon.shulkds.check_updates": "Проверить обновления"
 }

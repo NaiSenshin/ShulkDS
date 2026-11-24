@@ -101,6 +101,7 @@ mod commands;
 mod composter;
 mod consume;
 mod control;
+mod controlify_hud;
 mod copper_golems;
 mod cosmetics;
 mod creaking;
@@ -194,6 +195,9 @@ mod lan_vehicles;
 mod lan_waypoints;
 mod launch_api;
 mod leads;
+mod legacy_crafting;
+mod legacy_creative;
+mod legacy_gui;
 mod level_particles;
 mod levels;
 mod lightning;
@@ -326,6 +330,8 @@ mod shader_packs;
 mod shelf;
 mod shield;
 mod shoulders;
+mod shulkds_dashboard;
+mod shulkds_title;
 mod sign_edit;
 mod sniffers;
 mod social;
@@ -335,12 +341,6 @@ mod spectator;
 mod spill;
 mod splash_water;
 mod split;
-mod controlify_hud;
-mod legacy_crafting;
-mod legacy_creative;
-mod legacy_gui;
-mod shulkds_dashboard;
-mod shulkds_title;
 mod startup_menu;
 mod station_control;
 mod stations;
@@ -738,11 +738,13 @@ impl Options {
                 "--pregen" => horizon_client::command::vanilla::set_horizon_commands(true),
                 arg if arg.starts_with("--shulkds-mode=") => {
                     let val = arg.trim_start_matches("--shulkds-mode=");
-                    o.shulkds_mode = horizon_client::dual_screen::DualScreenMode::from_str_loose(val);
+                    o.shulkds_mode =
+                        horizon_client::dual_screen::DualScreenMode::from_str_loose(val);
                 }
                 arg if arg.starts_with("--shulkds-preset=") => {
                     let val = arg.trim_start_matches("--shulkds-preset=");
-                    o.shulkds_preset = horizon_client::dual_screen::DevicePreset::from_str_loose(val);
+                    o.shulkds_preset =
+                        horizon_client::dual_screen::DevicePreset::from_str_loose(val);
                 }
                 _ => {
                     let value = args
@@ -829,10 +831,16 @@ impl Options {
                                 o.look = Some((y.parse()?, p.parse()?));
                             }
                             "--shulkds-mode" => {
-                                o.shulkds_mode = horizon_client::dual_screen::DualScreenMode::from_str_loose(&value);
+                                o.shulkds_mode =
+                                    horizon_client::dual_screen::DualScreenMode::from_str_loose(
+                                        &value,
+                                    );
                             }
                             "--shulkds-preset" => {
-                                o.shulkds_preset = horizon_client::dual_screen::DevicePreset::from_str_loose(&value);
+                                o.shulkds_preset =
+                                    horizon_client::dual_screen::DevicePreset::from_str_loose(
+                                        &value,
+                                    );
                             }
                             _ => return Err("unknown option".into()),
                         }
@@ -8302,7 +8310,7 @@ impl Game<'_> {
             }
             stack.count = left;
         }
-        if self.use_legacy_gui() {
+        if self.use_legacy_inventory_layout() {
             let ix = self.cursor.0 - 12.0;
             let iy = self.cursor.1 - 12.0;
             let start = batch.vertices.len();
@@ -8592,8 +8600,7 @@ impl Game<'_> {
             let delay = horizon_client::attack_strength::delay(self.main_hand_attack_speed());
             let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
             let top_hi = if self.shulkds.config.enabled
-                && self.shulkds.config.mode
-                    == horizon_client::dual_screen::DualScreenMode::Emulated
+                && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::Emulated
             {
                 (self.shulkds.layout.top_viewport.height / batch.scale).round() as i32
             } else {
@@ -8618,10 +8625,20 @@ impl Game<'_> {
                     });
                 }
             }
-            if !self.shulkds.config.enabled || !self.shulkds.config.top_hud_minimal {
+            let ds_hud = self.shulkds.config.enabled && self.shulkds.config.top_hud_minimal;
+            let top_classic_hotbar = ds_hud
+                && self.settings.extras.shulkds_hotbar
+                    == horizon_client::dual_screen::HotbarPosition::TopScreenClassic;
+            if !ds_hud || top_classic_hotbar {
+                let hotbar_hi = if top_classic_hotbar { top_hi } else { hi };
                 self.gui_layer("minecraft:hotbar", &mut batch, |g, batch| {
                     if spectator {
+                        let prev_h = batch.height;
+                        if top_classic_hotbar {
+                            batch.height = top_hi as f32;
+                        }
                         g.draw_spectator_hotbar(batch);
+                        batch.height = prev_h;
                     } else {
                         let partial = g.clock.fraction() as f32;
                         let inputs = hud_layout::HotbarInputs {
@@ -8638,7 +8655,7 @@ impl Game<'_> {
                         };
                         let draws = hud_layout::hotbar_with_attack_side(
                             wi,
-                            hi,
+                            hotbar_hi,
                             &inputs,
                             MOBILE_PLATFORM.then_some(g.settings.touch.attack_indicator_left),
                         );
@@ -8669,15 +8686,21 @@ impl Game<'_> {
         }
         if show_hud {
             let top_hi = if self.shulkds.config.enabled
-                && self.shulkds.config.mode
-                    == horizon_client::dual_screen::DualScreenMode::Emulated
+                && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::Emulated
             {
                 (self.shulkds.layout.top_viewport.height / batch.scale).round() as i32
             } else {
                 hi
             };
             let ds_hud = self.shulkds.config.enabled && self.shulkds.config.top_hud_minimal;
-            let bar_hi = if ds_hud { top_hi + 20 } else { top_hi };
+            let top_classic_hotbar = ds_hud
+                && self.settings.extras.shulkds_hotbar
+                    == horizon_client::dual_screen::HotbarPosition::TopScreenClassic;
+            let bar_hi = if ds_hud && !top_classic_hotbar {
+                top_hi + 20
+            } else {
+                top_hi
+            };
             // Hud.nextContextualInfoState: the jump bar, the experience bar or
             // the locator bar above the hotbar.
             let has_experience = !self.creative && !spectator;
@@ -8696,7 +8719,7 @@ impl Game<'_> {
                 self.draw_mount_hud(&mut batch, wi, bar_hi)
             };
             // Without the survival bars only the mount's hearts raise it.
-            bar_height = if ds_hud {
+            bar_height = if ds_hud && !top_classic_hotbar {
                 20
             } else {
                 39 + 10 * ((vehicle_hearts + 9) / 10)
@@ -8709,7 +8732,8 @@ impl Game<'_> {
                     g.draw_jump_bar(batch, wi, bar_hi);
                 }
                 if contextual == ContextualBar::Locator {
-                    let (sprite, [x, y, w, h]) = horizon_client::locator_bar::background(wi, bar_hi);
+                    let (sprite, [x, y, w, h]) =
+                        horizon_client::locator_bar::background(wi, bar_hi);
                     horizon_client::ui::nine_slice(
                         batch,
                         &g.gui.atlas,
@@ -8825,8 +8849,15 @@ impl Game<'_> {
                     if ds_hud {
                         // Vanilla's `bar_height.max(59)` placed the highlight 59 GUI px above the
                         // bottom in Survival (45 in Creative). Shift it halfway down while staying
-                        // clear of the XP bar (`top_hi - 9`), XP level (`top_hi - 15`), and mount hearts.
-                        let y = top_hi - if g.creative { 22 } else { 31 + mount_lift };
+                        // clear of the XP bar, XP level, mount hearts, and classic top hotbar.
+                        let y = top_hi
+                            - if top_classic_hotbar {
+                                if g.creative { 42 } else { 51 + mount_lift }
+                            } else if g.creative {
+                                22
+                            } else {
+                                31 + mount_lift
+                            };
                         g.draw_selected_name_at_y(batch, y);
                     } else {
                         g.draw_selected_name(batch, bar_height, !g.creative);
@@ -9064,7 +9095,7 @@ impl Game<'_> {
                 | BlockEntity::TestInstanceBlock(_),
             ) => {}
             None => {
-                if !self.use_legacy_gui() {
+                if !self.use_legacy_inventory_layout() {
                     v.extend((0..self.craft_size * self.craft_size).map(|i| 100 + i));
                     v.push(200);
                 }
@@ -9136,7 +9167,7 @@ impl Game<'_> {
                 | BlockEntity::TestInstanceBlock(_),
             ) => 0,
             None => {
-                (if self.use_legacy_gui() {
+                (if self.use_legacy_inventory_layout() {
                     0
                 } else {
                     self.craft_size * self.craft_size + 1
@@ -9257,7 +9288,7 @@ impl Game<'_> {
     /// `container/slot_highlight_back` sprite behind the slot at `x`, `y` (its
     /// 16 x 16 item box), the `_front` one over its item.
     fn draw_slot_highlight_sz(&self, batch: &mut HudBatch, front: bool, x: f32, y: f32, sz: f32) {
-        if self.use_legacy_gui() {
+        if self.use_legacy_inventory_layout() {
             if front {
                 let pad = (sz - 16.0) * 0.5;
                 horizon_client::ui::blit_sprite(
@@ -9290,7 +9321,13 @@ impl Game<'_> {
         );
     }
     fn draw_slot_highlight(&self, batch: &mut HudBatch, front: bool, x: f32, y: f32) {
-        let sz = if self.screen == Screen::Creative { 27.0 } else { 21.0 };
+        let sz = if self.screen == Screen::Creative && self.use_legacy_creative() {
+            27.0
+        } else if self.use_legacy_inventory_layout() {
+            21.0
+        } else {
+            18.0
+        };
         self.draw_slot_highlight_sz(batch, front, x, y, sz);
     }
     /// The highlight of the slot under the cursor, for the screens whose
@@ -9387,7 +9424,7 @@ impl Game<'_> {
         let drag = self.drag_view();
         for i in self.slots() {
             let (sx, sy) = self.slot_position(i);
-            if !self.use_legacy_gui() && i == 504 && self.offhand.is_none() {
+            if !self.use_legacy_inventory_layout() && i == 504 && self.offhand.is_none() {
                 batch.sprite(
                     &self.gui.atlas,
                     "gui/sprites/container/slot/shield",
@@ -9395,7 +9432,10 @@ impl Game<'_> {
                     oy + sy,
                 );
             }
-            if !self.use_legacy_gui() && (500..504).contains(&i) && self.armor[i - 500].is_none() {
+            if !self.use_legacy_inventory_layout()
+                && (500..504).contains(&i)
+                && self.armor[i - 500].is_none()
+            {
                 let icon = ["helmet", "chestplate", "leggings", "boots"][i - 500];
                 batch.sprite(
                     &self.gui.atlas,
@@ -9495,9 +9535,17 @@ impl Game<'_> {
                         });
                         screen_info::name_container(|| title.plain());
                         batch.text_styled(atlas, &title, ox + 14.0, oy + 11.0, grey, false);
-                        let ingredient_lbl = self.translate("legacy.container.ingredient", "Ingredient");
+                        let ingredient_lbl =
+                            self.translate("legacy.container.ingredient", "Ingredient");
                         let iw = HudBatch::text_width(atlas, &ingredient_lbl);
-                        batch.text(atlas, &ingredient_lbl, ox + 70.0 - iw, oy + 32.0, grey, false);
+                        batch.text(
+                            atlas,
+                            &ingredient_lbl,
+                            ox + 70.0 - iw,
+                            oy + 32.0,
+                            grey,
+                            false,
+                        );
                         let fuel_lbl = self.translate("legacy.container.fuel", "Fuel");
                         let fw = HudBatch::text_width(atlas, &fuel_lbl);
                         batch.text(atlas, &fuel_lbl, ox + 70.0 - fw, oy + 79.0, grey, false);
@@ -9586,7 +9634,7 @@ impl Game<'_> {
                 ) => {}
                 None if self.mount_active() => self.draw_mount_background(batch, ox, oy),
                 None => {
-                    if self.use_legacy_gui() {
+                    if self.use_legacy_inventory_layout() {
                         // InventoryScreenMixin (hasClassicCrafting == false): centered armor + portrait + shield.
                         self.legacy_panel(batch, ox, oy, 215.0, 217.0);
                         let armor_icons = [
@@ -9600,14 +9648,7 @@ impl Game<'_> {
                             let by = oy + 14.0 + idx as f32 * 21.0;
                             self.legacy_slot_box(batch, bx, by, 21.0);
                             if self.armor[idx].is_none() {
-                                self.legacy_slot_with(
-                                    batch,
-                                    icon,
-                                    bx + 2.5,
-                                    by + 2.5,
-                                    16.0,
-                                    16.0,
-                                );
+                                self.legacy_slot_with(batch, icon, bx + 2.5, by + 2.5, 16.0, 16.0);
                             }
                         }
                         self.legacy_entity_panel(batch, ox + 90.0, oy + 13.0, 63.0, 84.0);
@@ -9663,7 +9704,11 @@ impl Game<'_> {
             && !self.mount_active()
             && !self.legacy_crafting_open()
         {
-            let img_w = if self.use_legacy_gui() { 215 } else { 176 };
+            let img_w = if self.use_legacy_inventory_layout() {
+                215
+            } else {
+                176
+            };
             self.draw_inventory_effects(batch, (ox, oy), img_w)
         } else {
             None
@@ -9699,6 +9744,7 @@ impl Game<'_> {
         self.recipe_ui.reset_screen();
         if self.remote.is_some() {
             self.legacy_crafting.pocket_crafting = false;
+            self.legacy_crafting.clear_active_session();
             return self.remote_close_container();
         }
         let mut returned: Vec<ItemStack> = self.carried.take().into_iter().collect();
@@ -9714,6 +9760,7 @@ impl Game<'_> {
         self.craft_size = 2;
         self.craft_table = None;
         self.legacy_crafting.pocket_crafting = false;
+        self.legacy_crafting.clear_active_session();
         self.shulkds.dashboard.container_open = false;
         self.shulkds.dashboard.container_pos = None;
         if let Some(key) = self.container.take() {
@@ -15122,6 +15169,7 @@ impl Game<'_> {
         let items = self.bedrock_items.unwrap_or(screen.selected);
         let inventory = screen.tabs.iter().position(|t| t.inventory);
         let both = self.settings.bedrock_inventory
+            && !self.shulkds.config.enabled
             && self.screen == Screen::Creative
             && width >= BEDROCK_SHIFT * 2.0 + Creative::WIDTH
             && screen.tabs.get(items).is_some_and(|t| !t.inventory);
@@ -15224,7 +15272,7 @@ impl Game<'_> {
     fn draw_creative(&mut self, batch: &mut HudBatch) {
         // CreativeModeInventoryScreen: `CommonComponents.EMPTY` for a title.
         screen_info::begin_container("creative");
-        if self.use_legacy_gui() {
+        if self.use_legacy_creative() {
             self.draw_legacy_creative(batch);
             return;
         }
@@ -15592,7 +15640,7 @@ impl Game<'_> {
         let Some(batch) = self.gui_scale() else {
             return;
         };
-        if self.use_legacy_gui() {
+        if self.use_legacy_creative() {
             self.click_legacy_creative(&batch, right);
             return;
         }
@@ -16025,15 +16073,7 @@ impl Game<'_> {
             });
             let mut hud = HudBatch::new(size);
             let (w, h) = (hud.width, hud.height);
-            horizon_client::ui::menu_background(
-                &mut hud,
-                &self.gui.atlas,
-                0.0,
-                0.0,
-                w,
-                h,
-                false,
-            );
+            horizon_client::ui::menu_background(&mut hud, &self.gui.atlas, 0.0, 0.0, w, h, false);
             let status = |x: i32, z: i32| view.status(x, z);
             horizon_client::level_loading::draw(
                 &mut hud,
@@ -16056,7 +16096,12 @@ impl Game<'_> {
                     screen_info::level_loading(Some(frac), &screen_info::tr)
                 });
                 let mut hud = HudBatch::new(size);
-                horizon_client::level_loading::draw_progress(&mut hud, &self.gui.atlas, &line, frac);
+                horizon_client::level_loading::draw_progress(
+                    &mut hud,
+                    &self.gui.atlas,
+                    &line,
+                    frac,
+                );
                 return self.present_loading_screen(hud);
             }
             return Ok(false);
@@ -16303,8 +16348,7 @@ impl Game<'_> {
         // Update renderer aspect ratio and physical viewport override for ShulkDS
         if let Some(r) = self.renderer.as_mut() {
             if self.shulkds.config.enabled
-                && self.shulkds.config.mode
-                    == horizon_client::dual_screen::DualScreenMode::Emulated
+                && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::Emulated
             {
                 let top = &self.shulkds.layout.top_viewport;
                 r.aspect_override = Some(top.aspect_ratio());
@@ -16715,7 +16759,10 @@ impl Game<'_> {
             let overlay_loading = self.remote_overlay_active();
             let sec_size = comp.size();
             if self.should_present_shulkds_bottom(sec_size) {
-                let mut sec_hud = horizon_client::hud::HudBatch::new(sec_size);
+                let mut sec_hud = horizon_client::hud::HudBatch::new_shulkds_bottom(
+                    sec_size,
+                    self.shulkds.config.touch_gui_scale,
+                );
                 let bottom_rect = horizon_client::dual_screen::ViewportRect::new(
                     0.0,
                     0.0,
@@ -16924,6 +16971,7 @@ impl Game<'_> {
                 }
                 Screen::Creative => {
                     self.pad_clear_focus();
+                    self.reset_inventory_clicks();
                     self.carried = None;
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -17016,7 +17064,7 @@ impl Game<'_> {
                 if self.screen == Screen::Creative && self.creative_screen.tab().search => {}
             KeyCode::KeyE => match self.screen {
                 Screen::Playing if self.spectator() => {}
-                Screen::Playing if self.shulkds.config.enabled => {
+                Screen::Playing if self.shulkds.config.enabled && !self.use_classic_inventory() => {
                     if !self.open_ridden_mount_menu() {
                         if self.creative {
                             self.screen = Screen::Creative;
@@ -17051,6 +17099,7 @@ impl Game<'_> {
                 }
                 Screen::Creative => {
                     self.pad_clear_focus();
+                    self.reset_inventory_clicks();
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
@@ -17641,6 +17690,42 @@ impl Game<'_> {
 fn autosave_interval(rate: f32) -> i64 {
     i64::from((rate * 300.0) as i32).max(100)
 }
+fn shulkds_clamp_panel_to_monitor(
+    monitor: Option<winit::monitor::MonitorHandle>,
+    target_px: [u32; 2],
+) -> [u32; 2] {
+    let mut pw = f64::from(target_px[0]);
+    let mut ph = f64::from(target_px[1]);
+    if let Some(m) = monitor {
+        let ms = m.size();
+        if ms.width > 0 && ms.height > 0 && (pw > f64::from(ms.width) || ph > f64::from(ms.height))
+        {
+            let fit = (f64::from(ms.width) * 0.9 / pw).min(f64::from(ms.height) * 0.9 / ph);
+            pw = (pw * fit).round().max(1.0);
+            ph = (ph * fit).round().max(1.0);
+        }
+    }
+    [pw as u32, ph as u32]
+}
+
+/// Convert a target physical handheld panel resolution into desktop `LogicalSize`,
+/// accounting for HiDPI scaling so the Wayland/X11 swapchain hits exact 1:1 pixels
+/// (or scales down cleanly to 90% of the monitor when larger than the screen).
+fn shulkds_desktop_window_logical_size(
+    event_loop: &ActiveEventLoop,
+    known_scale: Option<f64>,
+    target_px: [u32; 2],
+) -> winit::dpi::LogicalSize<f64> {
+    let monitor = event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next());
+    let scale = known_scale
+        .unwrap_or_else(|| monitor.as_ref().map_or(1.0, |m| m.scale_factor()))
+        .max(0.5);
+    let [pw, ph] = shulkds_clamp_panel_to_monitor(monitor, target_px);
+    winit::dpi::LogicalSize::new(f64::from(pw) / scale, f64::from(ph) / scale)
+}
+
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
@@ -17659,13 +17744,26 @@ impl ApplicationHandler for Game<'_> {
         }
         // The Window constructor: created fullscreen when options.txt or --fullscreen says so.
         let fullscreen = self.settings.fullscreen || self.options.fullscreen;
-        let default_shulkds_size = self.shulkds.config.mode
-            == horizon_client::dual_screen::DualScreenMode::Emulated
-            && self.options.window_size == [1280, 720];
-        let size = if default_shulkds_size {
-            [960.0, 1104.0]
+        let inner_size = if !MOBILE_PLATFORM
+            && self.shulkds.config.enabled
+            && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::DualWindow
+        {
+            let top_px = if self.options.window_size == [1280, 720] {
+                self.shulkds.config.preset.native_panel_sizes().0
+            } else {
+                self.options.window_size
+            };
+            shulkds_desktop_window_logical_size(event_loop, None, top_px)
         } else {
-            self.options.window_size.map(f64::from)
+            let default_shulkds_size = self.shulkds.config.mode
+                == horizon_client::dual_screen::DualScreenMode::Emulated
+                && self.options.window_size == [1280, 720];
+            let size = if default_shulkds_size {
+                [960.0, 1104.0]
+            } else {
+                self.options.window_size.map(f64::from)
+            };
+            winit::dpi::LogicalSize::new(size[0], size[1])
         };
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
         let attributes = Window::default_attributes()
@@ -17680,7 +17778,7 @@ impl ApplicationHandler for Game<'_> {
         let window_step = startup::step("window.create");
         let window = match event_loop.create_window(
             attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+                .with_inner_size(inner_size)
                 .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
                 .with_visible(!self.options.offscreen),
         ) {
@@ -17742,19 +17840,26 @@ impl ApplicationHandler for Game<'_> {
             && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::DualWindow
             && self.secondary_window.is_none()
         {
-            let (sec_w, sec_h) = match self.shulkds.config.preset {
-                horizon_client::dual_screen::DevicePreset::RpDuo => (720.0, 540.0),
-                horizon_client::dual_screen::DevicePreset::AynThor => (620.0, 540.0),
-                _ => (720.0, 540.0),
-            };
+            let sec_px = self.shulkds.config.preset.native_panel_sizes().1;
+            let known_scale = self.window.as_ref().map(|w| w.scale_factor());
+            let sec_logical = shulkds_desktop_window_logical_size(event_loop, known_scale, sec_px);
             let sec_attrs = Window::default_attributes()
                 .with_title("ShulkDS - Bottom Screen [Touch Dashboard]")
-                .with_inner_size(winit::dpi::LogicalSize::new(sec_w, sec_h));
+                .with_inner_size(sec_logical);
             if let Ok(sec_w) = event_loop.create_window(sec_attrs) {
                 let sec_arc = Arc::new(sec_w);
                 if let Some(r) = &self.renderer {
                     match r.hud_compositor(sec_arc.clone()) {
-                        Ok(comp) => self.secondary_compositor = Some(comp),
+                        Ok(comp) => {
+                            let csize = comp.size();
+                            log::info!(
+                                "ShulkDS: attached desktop secondary window {}x{} (preset: {})",
+                                csize[0],
+                                csize[1],
+                                self.shulkds.config.preset.short_name()
+                            );
+                            self.secondary_compositor = Some(comp);
+                        }
                         Err(e) => log::warn!("ShulkDS: secondary compositor init: {e}"),
                     }
                 }
@@ -17871,6 +17976,49 @@ impl Game<'_> {
                         self.focus_lost = Some(Instant::now());
                     }
                 }
+                WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    mut inner_size_writer,
+                } => {
+                    let monitor = self
+                        .secondary_window
+                        .as_ref()
+                        .and_then(|w| w.current_monitor().or_else(|| w.primary_monitor()));
+                    let sec_px = shulkds_clamp_panel_to_monitor(
+                        monitor,
+                        self.shulkds.config.preset.native_panel_sizes().1,
+                    );
+                    let _ = inner_size_writer
+                        .request_inner_size(winit::dpi::PhysicalSize::new(sec_px[0], sec_px[1]));
+                    if let Some(comp) = &mut self.secondary_compositor {
+                        comp.resize(sec_px[0], sec_px[1]);
+                    }
+                    self.shulkds.dashboard.last_bottom_sig = 0;
+                    self.shulkds.dashboard.last_bottom_present = None;
+                    log::info!(
+                        "ShulkDS: locked desktop secondary window to {}x{} at scale {:.2}",
+                        sec_px[0],
+                        sec_px[1],
+                        scale_factor
+                    );
+                }
+                WindowEvent::Resized(size) => {
+                    if size.width > 0 && size.height > 0 {
+                        if let Some(comp) = &mut self.secondary_compositor {
+                            comp.resize(size.width, size.height);
+                        }
+                        self.shulkds.dashboard.last_bottom_sig = 0;
+                        self.shulkds.dashboard.last_bottom_present = None;
+                        log::info!(
+                            "ShulkDS: resized desktop secondary window to {}x{}",
+                            size.width,
+                            size.height
+                        );
+                    }
+                }
+                WindowEvent::CloseRequested => {
+                    let _ = self.begin_closing_save(true);
+                }
                 _ => {}
             }
             return;
@@ -17955,6 +18103,41 @@ impl Game<'_> {
     }
     fn handle_window_event_inner(&mut self, event_loop: &dyn EventLoopCtl, mut event: WindowEvent) {
         if self.platform_keypad_event(event_loop, &mut event) {
+            return;
+        }
+        if !MOBILE_PLATFORM
+            && self.shulkds.config.enabled
+            && self.shulkds.config.mode == horizon_client::dual_screen::DualScreenMode::DualWindow
+            && matches!(event, WindowEvent::ScaleFactorChanged { .. })
+        {
+            if let WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                mut inner_size_writer,
+            } = event
+            {
+                let top_px = if self.options.window_size == [1280, 720] {
+                    self.shulkds.config.preset.native_panel_sizes().0
+                } else {
+                    self.options.window_size
+                };
+                let monitor = self
+                    .window
+                    .as_ref()
+                    .and_then(|w| w.current_monitor().or_else(|| w.primary_monitor()));
+                let fit_px = shulkds_clamp_panel_to_monitor(monitor, top_px);
+                let _ = inner_size_writer
+                    .request_inner_size(winit::dpi::PhysicalSize::new(fit_px[0], fit_px[1]));
+                if let Some(r) = &mut self.renderer {
+                    r.resize(fit_px[0], fit_px[1]);
+                }
+                self.shulkds.resize(fit_px[0], fit_px[1]);
+                log::info!(
+                    "ShulkDS: locked primary Game window to {}x{} at scale {:.2}",
+                    fit_px[0],
+                    fit_px[1],
+                    scale_factor
+                );
+            }
             return;
         }
 
@@ -18099,8 +18282,7 @@ impl Game<'_> {
             match &event {
                 WindowEvent::CursorMoved { position, .. } => {
                     if !self.physical_buttons.is_empty() && self.renderer.is_some() {
-                        self.cursor =
-                            self.shulkds_top_cursor_from_physical(position.x, position.y);
+                        self.cursor = self.shulkds_top_cursor_from_physical(position.x, position.y);
                     }
                 }
                 WindowEvent::MouseInput {
@@ -18168,8 +18350,12 @@ impl Game<'_> {
                 }
                 WindowEvent::Focused(focused) => {
                     let secondary_focused = self.shulkds.config.enabled
-                        && (self.secondary_window.as_ref().is_some_and(|w| w.has_focus())
-                            || horizon_client::dual_screen_android::secondary_ime_or_grace_active());
+                        && (self
+                            .secondary_window
+                            .as_ref()
+                            .is_some_and(|w| w.has_focus())
+                            || horizon_client::dual_screen_android::secondary_ime_or_grace_active(
+                            ));
                     if focused || secondary_focused {
                         self.focused = true;
                         if !focused && secondary_focused {
@@ -18359,8 +18545,12 @@ impl Game<'_> {
                 }
                 WindowEvent::Focused(focused) => {
                     let secondary_focused = self.shulkds.config.enabled
-                        && (self.secondary_window.as_ref().is_some_and(|w| w.has_focus())
-                            || horizon_client::dual_screen_android::secondary_ime_or_grace_active());
+                        && (self
+                            .secondary_window
+                            .as_ref()
+                            .is_some_and(|w| w.has_focus())
+                            || horizon_client::dual_screen_android::secondary_ime_or_grace_active(
+                            ));
                     if !focused && secondary_focused {
                         self.focused = true;
                         self.focus_lost = None;
@@ -18411,8 +18601,7 @@ impl Game<'_> {
                         && self.renderer.is_some()
                     {
                         let previous = self.cursor;
-                        self.cursor =
-                            self.shulkds_top_cursor_from_physical(position.x, position.y);
+                        self.cursor = self.shulkds_top_cursor_from_physical(position.x, position.y);
                         if self.shulkds_emulated() && !self.pad_synthetic_input() {
                             let bottom = self.shulkds.layout.bottom_viewport;
                             let px = position.x as f32;
@@ -18458,7 +18647,7 @@ impl Game<'_> {
                             self.world_options_drag();
                         }
                         if self.screen == Screen::Creative {
-                            if self.use_legacy_gui() {
+                            if self.use_legacy_creative() {
                                 self.drag_legacy_creative();
                             } else if let Some(b) = self.gui_scale() {
                                 let (_, oy) = Self::creative_origin(&b);
@@ -18498,10 +18687,8 @@ impl Game<'_> {
                                 && bottom.contains(px, py))
                                 || self.shulkds.dashboard.pointer_down)
                         {
-                            let norm_x =
-                                ((px - bottom.x) / bottom.width.max(1.0)).clamp(0.0, 1.0);
-                            let norm_y =
-                                ((py - bottom.y) / bottom.height.max(1.0)).clamp(0.0, 1.0);
+                            let norm_x = ((px - bottom.x) / bottom.width.max(1.0)).clamp(0.0, 1.0);
+                            let norm_y = ((py - bottom.y) / bottom.height.max(1.0)).clamp(0.0, 1.0);
                             let action = match touch.phase {
                                 winit::event::TouchPhase::Started => {
                                     horizon_client::dual_screen::BottomPointerAction::Down {
@@ -18660,7 +18847,7 @@ impl Game<'_> {
                         && d != 0.0
                         && self.bundle_scroll(scaled(raw_x), scaled(raw_y));
                     if self.screen == Screen::Creative && d != 0.0 && !bundle {
-                        if self.use_legacy_gui() {
+                        if self.use_legacy_creative() {
                             self.scroll_legacy_creative(d);
                         } else {
                             self.creative_screen.wheel(f64::from(d), &self.pack.names);
@@ -18693,12 +18880,8 @@ impl Game<'_> {
                     if self.shulkds_mouse_captured_by_shell(state == ElementState::Pressed) =>
                 {
                     let btn = match button {
-                        MouseButton::Left => {
-                            horizon_client::dual_screen::PointerButton::Primary
-                        }
-                        MouseButton::Right => {
-                            horizon_client::dual_screen::PointerButton::Secondary
-                        }
+                        MouseButton::Left => horizon_client::dual_screen::PointerButton::Primary,
+                        MouseButton::Right => horizon_client::dual_screen::PointerButton::Secondary,
                         _ => horizon_client::dual_screen::PointerButton::Middle,
                     };
                     self.shulkds_handle_shell_mouse(btn, state == ElementState::Pressed);
@@ -19051,7 +19234,7 @@ impl Game<'_> {
                 WindowEvent::KeyboardInput { event, .. } if self.key_legacy_creative(&event) => {}
                 WindowEvent::KeyboardInput { event, .. }
                     if self.screen == Screen::Creative
-                        && !self.use_legacy_gui()
+                        && !self.use_legacy_creative()
                         && self.creative_screen.tab().search
                         && event.state == ElementState::Pressed
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
@@ -19299,7 +19482,8 @@ impl Game<'_> {
                     self.frame_ticks = elapsed.as_secs_f32() * 20.0;
                     self.previous = now;
                     // Temporarily disabled keyboard arrow-key camera controls.
-                    if false && self.screen == Screen::Playing
+                    if false
+                        && self.screen == Screen::Playing
                         && self.title.is_none()
                         && self.sign_edit.is_none()
                         && self.book.is_none()
@@ -22250,19 +22434,36 @@ impl Loading {
         // The Window constructor: created fullscreen when options.txt or --fullscreen says so.
         let fullscreen =
             self.settings.fullscreen || self.options.as_ref().is_some_and(|o| o.fullscreen);
-        let default_shulkds_size = !MOBILE_PLATFORM
-            && self.options.as_ref().is_some_and(|o| {
-                o.shulkds_mode.unwrap_or(horizon_client::dual_screen::DualScreenMode::Emulated)
-                    == horizon_client::dual_screen::DualScreenMode::Emulated
-                    && o.window_size == [1280, 720]
-            });
-        let size = if default_shulkds_size {
-            [960.0, 1104.0]
+        let opt_win = self.options.as_ref().map_or([1280, 720], |o| o.window_size);
+        let shulkds_mode = self
+            .options
+            .as_ref()
+            .and_then(|o| o.shulkds_mode)
+            .unwrap_or(horizon_client::dual_screen::DualScreenMode::Emulated);
+        let shulkds_preset = self
+            .options
+            .as_ref()
+            .and_then(|o| o.shulkds_preset)
+            .unwrap_or(horizon_client::dual_screen::DevicePreset::RpDuo);
+        let inner_size = if !MOBILE_PLATFORM
+            && shulkds_mode == horizon_client::dual_screen::DualScreenMode::DualWindow
+        {
+            let top_px = if opt_win == [1280, 720] {
+                shulkds_preset.native_panel_sizes().0
+            } else {
+                opt_win
+            };
+            shulkds_desktop_window_logical_size(event_loop, None, top_px)
         } else {
-            self.options
-                .as_ref()
-                .map_or([1280, 720], |o| o.window_size)
-                .map(f64::from)
+            let default_shulkds_size = !MOBILE_PLATFORM
+                && shulkds_mode == horizon_client::dual_screen::DualScreenMode::Emulated
+                && opt_win == [1280, 720];
+            let size = if default_shulkds_size {
+                [960.0, 1104.0]
+            } else {
+                opt_win.map(f64::from)
+            };
+            winit::dpi::LogicalSize::new(size[0], size[1])
         };
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
         let attributes = Window::default_attributes()
@@ -22277,7 +22478,7 @@ impl Loading {
         let window_step = startup::step("window.create");
         let window = match event_loop.create_window(
             attributes
-                .with_inner_size(winit::dpi::LogicalSize::new(size[0], size[1]))
+                .with_inner_size(inner_size)
                 .with_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)))
                 .with_visible(!self.options.as_ref().is_some_and(|o| o.offscreen)),
         ) {
@@ -22359,6 +22560,50 @@ impl Loading {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
+            return;
+        }
+        if !MOBILE_PLATFORM
+            && matches!(event, WindowEvent::ScaleFactorChanged { .. })
+            && self
+                .options
+                .as_ref()
+                .and_then(|o| o.shulkds_mode)
+                .unwrap_or(horizon_client::dual_screen::DualScreenMode::Emulated)
+                == horizon_client::dual_screen::DualScreenMode::DualWindow
+        {
+            if let WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                mut inner_size_writer,
+            } = event
+            {
+                let preset = self
+                    .options
+                    .as_ref()
+                    .and_then(|o| o.shulkds_preset)
+                    .unwrap_or(horizon_client::dual_screen::DevicePreset::RpDuo);
+                let opt_win = self.options.as_ref().map_or([1280, 720], |o| o.window_size);
+                let top_px = if opt_win == [1280, 720] {
+                    preset.native_panel_sizes().0
+                } else {
+                    opt_win
+                };
+                let monitor = self
+                    .window
+                    .as_ref()
+                    .and_then(|w| w.current_monitor().or_else(|| w.primary_monitor()));
+                let fit_px = shulkds_clamp_panel_to_monitor(monitor, top_px);
+                let _ = inner_size_writer
+                    .request_inner_size(winit::dpi::PhysicalSize::new(fit_px[0], fit_px[1]));
+                if let Some(r) = &mut self.renderer {
+                    r.resize(fit_px[0], fit_px[1]);
+                }
+                log::info!(
+                    "ShulkDS: locked startup window to {}x{} at scale {:.2}",
+                    fit_px[0],
+                    fit_px[1],
+                    scale_factor
+                );
+            }
             return;
         }
         if self.failure.is_some()
@@ -22783,8 +23028,12 @@ impl Loading {
         };
         drop(game_step);
         let game_ms = game_at.elapsed().as_millis();
+        let phys = window.inner_size();
         game.window = Some(window);
         game.renderer = Some(renderer);
+        if game.shulkds.config.enabled && phys.width > 0 && phys.height > 0 {
+            game.shulkds.resize(phys.width, phys.height);
+        }
         game.world_renderer_ready = true;
         game.fullscreen = self.fullscreen;
         game.panorama_rotation = self.panorama_rotation;

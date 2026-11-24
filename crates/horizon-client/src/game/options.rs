@@ -538,6 +538,7 @@ impl Game<'_> {
                 Event::NativeSettings(i) => self.native_settings_refresh(i),
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),
                 Event::Narrator => self.narrator_status_changed(),
+                Event::CheckUpdates => self.trigger_check_updates(),
             }
         }
         for action in self.ui.options.take_skin_actions() {

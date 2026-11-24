@@ -150,6 +150,14 @@ pub struct Extras {
     /// players' (`cosmeticsMine`, `cosmeticsOthers`; both on by default).
     pub cosmetics_mine: bool,
     pub cosmetics_others: bool,
+    /// ShulkDS: where the gameplay hotbar appears (`bottom`, `top`, or `classic`).
+    pub shulkds_hotbar: crate::dual_screen::HotbarPosition,
+    /// ShulkDS: use the classic manual 2x2 / 3x3 crafting grid + recipe book instead of Console crafting.
+    pub shulkds_classic_crafting: bool,
+    /// ShulkDS: open the classic top-screen survival/creative inventory instead of bottom/Legacy4J menus.
+    pub shulkds_classic_inventory: bool,
+    /// ShulkDS: check GitHub releases for new ShulkDS updates on launch.
+    pub shulkds_auto_updates: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -197,6 +205,10 @@ impl Default for Extras {
             music_page: false,
             cosmetics_mine: true,
             cosmetics_others: true,
+            shulkds_hotbar: crate::dual_screen::HotbarPosition::BottomScreenBottom,
+            shulkds_classic_crafting: false,
+            shulkds_classic_inventory: false,
+            shulkds_auto_updates: true,
         }
     }
 }
@@ -293,6 +305,16 @@ impl Extras {
                 "musicPage" => e.music_page = flag(e.music_page),
                 "cosmeticsMine" => e.cosmetics_mine = flag(e.cosmetics_mine),
                 "cosmeticsOthers" => e.cosmetics_others = flag(e.cosmetics_others),
+                "shulkdsHotbar" => {
+                    e.shulkds_hotbar = crate::dual_screen::HotbarPosition::parse(value);
+                }
+                "shulkdsClassicCrafting" => {
+                    e.shulkds_classic_crafting = flag(e.shulkds_classic_crafting);
+                }
+                "shulkdsClassicInventory" => {
+                    e.shulkds_classic_inventory = flag(e.shulkds_classic_inventory);
+                }
+                "shulkdsAutoUpdates" => e.shulkds_auto_updates = flag(e.shulkds_auto_updates),
                 _ => {}
             }
         }
@@ -300,7 +322,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\nshulkdsHotbar:{}\nshulkdsClassicCrafting:{}\nshulkdsClassicInventory:{}\nshulkdsAutoUpdates:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -349,6 +371,10 @@ impl Extras {
             bool_text(self.music_page),
             bool_text(self.cosmetics_mine),
             bool_text(self.cosmetics_others),
+            self.shulkds_hotbar.name(),
+            bool_text(self.shulkds_classic_crafting),
+            bool_text(self.shulkds_classic_inventory),
+            bool_text(self.shulkds_auto_updates),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -499,11 +525,21 @@ pub enum Item {
     /// Shown only while cosmetics are enabled (`horizon_cosmetics::enabled`).
     CosmeticsMine,
     CosmeticsOthers,
+    /// ShulkDS dual-screen & update options.
+    ShulkdsHotbar,
+    ShulkdsClassicCrafting,
+    ShulkdsClassicInventory,
+    ShulkdsAutoUpdates,
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
     let mut rows = vec![
+        Err("horizon.extras.header.shulkds"),
+        Ok(ShulkdsHotbar),
+        Ok(ShulkdsClassicCrafting),
+        Ok(ShulkdsClassicInventory),
+        Ok(ShulkdsAutoUpdates),
         Err("horizon.extras.header.lighting"),
         Ok(Fullbright),
         Ok(DynamicLights),
@@ -561,6 +597,10 @@ impl Item {
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others",
+            Item::ShulkdsHotbar => "horizon.extras.shulkds_hotbar",
+            Item::ShulkdsClassicCrafting => "horizon.extras.shulkds_classic_crafting",
+            Item::ShulkdsClassicInventory => "horizon.extras.shulkds_classic_inventory",
+            Item::ShulkdsAutoUpdates => "horizon.extras.shulkds_auto_updates",
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -587,6 +627,10 @@ impl Item {
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine.tooltip",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others.tooltip",
+            Item::ShulkdsHotbar => "horizon.extras.shulkds_hotbar.tooltip",
+            Item::ShulkdsClassicCrafting => "horizon.extras.shulkds_classic_crafting.tooltip",
+            Item::ShulkdsClassicInventory => "horizon.extras.shulkds_classic_inventory.tooltip",
+            Item::ShulkdsAutoUpdates => "horizon.extras.shulkds_auto_updates.tooltip",
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -622,6 +666,10 @@ impl Item {
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
             Item::CosmeticsMine => "My cosmetics",
             Item::CosmeticsOthers => "Other players' cosmetics",
+            Item::ShulkdsHotbar => "Hotbar Position",
+            Item::ShulkdsClassicCrafting => "Classic Crafting",
+            Item::ShulkdsClassicInventory => "Classic Inventory",
+            Item::ShulkdsAutoUpdates => "Auto Updates",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -632,9 +680,27 @@ impl Item {
             MouseTweaksWheel => MouseTweaks,
             SortKey => Sort,
             ChatIndicator => ChatAnimation,
-            Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
-            | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation | WheelCyclesSettings | MusicPage | CosmeticsMine | CosmeticsOthers => {
+            Fullbright
+            | DynamicLights
+            | OwnNameTag
+            | HideBlockParticles
+            | MouseTweaks
+            | Sort
+            | AutoReconnect
+            | NoAi
+            | AgentControl
+            | ReproKeys
+            | DiscordPresence
+            | Splitscreen
+            | ChatAnimation
+            | WheelCyclesSettings
+            | MusicPage
+            | CosmeticsMine
+            | CosmeticsOthers
+            | ShulkdsHotbar
+            | ShulkdsClassicCrafting
+            | ShulkdsClassicInventory
+            | ShulkdsAutoUpdates => {
                 return None;
             }
         })
@@ -701,6 +767,18 @@ impl Item {
             Item::WheelCyclesSettings => {
                 "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
             }
+            Item::ShulkdsHotbar => {
+                "Choose where the gameplay hotbar appears: bottom of the bottom screen, top of the bottom screen, or classic under the XP bar on the top screen."
+            }
+            Item::ShulkdsClassicCrafting => {
+                "Use the classic Java manual 2x2 and 3x3 crafting grid with the recipe book instead of the Console Edition tabbed crafting menu."
+            }
+            Item::ShulkdsClassicInventory => {
+                "Open the classic Survival and Creative inventory menus on the top screen when pressing Y/E instead of the bottom-screen touch inventory and Console Creative catalog."
+            }
+            Item::ShulkdsAutoUpdates => {
+                "Check GitHub Releases when ShulkDS starts and prompt to download and install new updates."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -718,7 +796,11 @@ impl Item {
             | Item::MouseTweaks
             | Item::Sort
             | Item::Splitscreen
-            | Item::WheelCyclesSettings => Some(Cost::None),
+            | Item::WheelCyclesSettings
+            | Item::ShulkdsHotbar
+            | Item::ShulkdsClassicCrafting
+            | Item::ShulkdsClassicInventory
+            | Item::ShulkdsAutoUpdates => Some(Cost::None),
             Item::CosmeticsMine | Item::CosmeticsOthers => Some(Cost::Low),
             _ => None,
         }
@@ -746,6 +828,9 @@ impl Item {
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
             Item::CosmeticsMine => e.cosmetics_mine,
             Item::CosmeticsOthers => e.cosmetics_others,
+            Item::ShulkdsClassicCrafting => e.shulkds_classic_crafting,
+            Item::ShulkdsClassicInventory => e.shulkds_classic_inventory,
+            Item::ShulkdsAutoUpdates => e.shulkds_auto_updates,
             _ => return None,
         })
     }
@@ -753,6 +838,9 @@ impl Item {
     pub fn value(self, e: &Extras) -> String {
         match self {
             Item::SortKey => crate::keybinds::display_name(&e.sort_key).plain(),
+            Item::ShulkdsHotbar => {
+                crate::lang::get_or(e.shulkds_hotbar.label_key(), e.shulkds_hotbar.short_label())
+            }
             other => match other.switch(e) {
                 Some(true) => crate::lang::get_or("On", "On"),
                 _ => crate::lang::get_or("Off", "Off"),
@@ -761,7 +849,7 @@ impl Item {
     }
     /// A click (`_back` for the right button: every item left is a switch,
     /// so both flip it). The sort key binds instead.
-    pub fn cycle(self, e: &mut Extras, _back: bool) {
+    pub fn cycle(self, e: &mut Extras, back: bool) {
         match self {
             Item::Fullbright => e.fullbright = !e.fullbright,
             Item::DynamicLights => e.dynamic_lights = !e.dynamic_lights,
@@ -783,6 +871,12 @@ impl Item {
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
             Item::CosmeticsMine => e.cosmetics_mine = !e.cosmetics_mine,
             Item::CosmeticsOthers => e.cosmetics_others = !e.cosmetics_others,
+            Item::ShulkdsHotbar => e.shulkds_hotbar = e.shulkds_hotbar.cycle(back),
+            Item::ShulkdsClassicCrafting => e.shulkds_classic_crafting = !e.shulkds_classic_crafting,
+            Item::ShulkdsClassicInventory => {
+                e.shulkds_classic_inventory = !e.shulkds_classic_inventory;
+            }
+            Item::ShulkdsAutoUpdates => e.shulkds_auto_updates = !e.shulkds_auto_updates,
             Item::SortKey => {}
         }
     }
@@ -957,5 +1051,35 @@ mod tests {
         for item in rows().into_iter().flatten() {
             assert!(!item.caption().is_empty() && !item.description().is_empty());
         }
+    }
+
+    #[test]
+    fn shulkds_extras_default_and_round_trip() {
+        let mut e = Extras::default();
+        assert_eq!(
+            e.shulkds_hotbar,
+            crate::dual_screen::HotbarPosition::BottomScreenBottom
+        );
+        assert!(!e.shulkds_classic_crafting);
+        assert!(!e.shulkds_classic_inventory);
+        assert!(e.shulkds_auto_updates);
+
+        Item::ShulkdsHotbar.cycle(&mut e, false);
+        assert_eq!(
+            e.shulkds_hotbar,
+            crate::dual_screen::HotbarPosition::BottomScreenTop
+        );
+        Item::ShulkdsHotbar.cycle(&mut e, false);
+        assert_eq!(
+            e.shulkds_hotbar,
+            crate::dual_screen::HotbarPosition::TopScreenClassic
+        );
+        Item::ShulkdsClassicCrafting.cycle(&mut e, false);
+        Item::ShulkdsClassicInventory.cycle(&mut e, false);
+        Item::ShulkdsAutoUpdates.cycle(&mut e, false);
+        assert!(e.shulkds_classic_crafting);
+        assert!(e.shulkds_classic_inventory);
+        assert!(!e.shulkds_auto_updates);
+        assert_eq!(Extras::parse(&e.serialize()), e);
     }
 }

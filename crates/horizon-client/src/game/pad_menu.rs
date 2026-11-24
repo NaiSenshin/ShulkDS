@@ -41,6 +41,10 @@ use winit::{
 /// D-pad auto-repeat: the first step at once, the next after a pause.
 const REPEAT_DELAY: f32 = 0.35;
 const REPEAT_EVERY: f32 = 0.09;
+/// Hold-to-craft repeat timing: initial pause, warm-up interval, and turbo rate.
+const FAST_CRAFT_DELAY: f32 = 0.30;
+const FAST_CRAFT_EVERY: f32 = 0.09;
+const FAST_CRAFT_TURBO: f32 = 0.05;
 /// Lines per second the right stick scrolls at full tilt.
 const SCROLL_SPEED: f32 = 12.0;
 /// How far the stick must lean to step focus.
@@ -65,7 +69,7 @@ struct Pending {
 pub(super) struct MenuCursor {
     /// Where the pad put the pointer (GUI pixels); `None` while the mouse
     /// has it.
-    pos: Option<(f32, f32)>,
+    pub(super) pos: Option<(f32, f32)>,
     last_poll: Option<Instant>,
     /// The stick moved the cursor last poll (it settles when let go).
     moving: bool,
@@ -141,8 +145,37 @@ impl Game<'_> {
 
     /// Focus mode is on for the open screen (the keyboard always focuses).
     fn pad_focus_mode(&self) -> bool {
-        self.pad.menu.keyboard
-            || (self.settings.controller.menu_nav == MenuNav::Focus) != self.pad.menu.swapped
+        resolve_pad_focus_mode(
+            self.pad.menu.keyboard,
+            self.settings.controller.menu_nav,
+            self.shulkds_virtual_mouse_gui_open(),
+            self.pad.menu.swapped,
+        )
+    }
+
+    /// True when hovering the Classic 2x2 or 3x3 crafting output slot (`200`).
+    fn pad_over_classic_craft_slot(&self) -> bool {
+        self.shulkds.config.enabled
+            && self.title.is_none()
+            && self.screen == Screen::Inventory
+            && !self.pad_legacy_crafting_active()
+            && self.inventory_target().0 == Some(200)
+    }
+
+    /// True when the Classic crafting output slot can add at least one more craft onto `self.carried`.
+    fn can_fast_craft_classic_output(&mut self) -> bool {
+        let Some(out) = self.slot_view(200) else {
+            return false;
+        };
+        let cap = self
+            .items()
+            .get(&out.item)
+            .map_or(64, |it| it.max_stack)
+            .max(1);
+        match &self.carried {
+            None => true,
+            Some(hand) => hand.same_item_same_components(&out) && hand.count + out.count <= cap,
+        }
     }
 
     /// Where focus can land: buttons drawn last frame, every registered
@@ -187,7 +220,7 @@ impl Game<'_> {
         match self.screen {
             Screen::Inventory => {
                 let (ox, oy) = self.inventory_origin(&batch);
-                let legacy = self.use_legacy_gui();
+                let legacy = self.use_legacy_inventory_layout();
                 targets.extend(self.slots().into_iter().map(|i| {
                     let (x, y) = self.slot_position(i);
                     if legacy {
@@ -212,7 +245,7 @@ impl Game<'_> {
                 targets.extend(self.recipe_book_targets());
             }
             Screen::Creative => {
-                if self.use_legacy_gui() {
+                if self.use_legacy_creative() {
                     targets.extend(self.legacy_creative_targets(&batch));
                 } else {
                     let (ox, oy) = Self::creative_origin(&batch);
@@ -221,6 +254,10 @@ impl Game<'_> {
                             let (x, y) = self.slot_position(i);
                             slot(ox + x, oy + y)
                         }));
+                        targets.push(slot(
+                            ox + Creative::TRASH_POSITION.0,
+                            oy + Creative::TRASH_POSITION.1,
+                        ));
                     } else {
                         for r in 0..5 {
                             for c in 0..9 {
@@ -272,7 +309,7 @@ impl Game<'_> {
                 Screen::Inventory => {
                     let (ox, oy) = self.inventory_origin(&batch);
                     let (x, y) = self.slot_position(self.selected);
-                    let pad = if self.use_legacy_gui() {
+                    let pad = if self.use_legacy_inventory_layout() {
                         (self.legacy_slot_size_for(self.selected) - 16.0) * 0.5
                     } else {
                         0.0
@@ -281,7 +318,7 @@ impl Game<'_> {
                         return Some(t);
                     }
                 }
-                Screen::Creative if self.use_legacy_gui() => {
+                Screen::Creative if self.use_legacy_creative() => {
                     if let Some(rect) = self.legacy_creative_first_slot_rect(&batch)
                         && let Some(t) = at(rect[0], rect[1])
                     {
@@ -489,9 +526,16 @@ impl Game<'_> {
         if self.pad_legacy_crafting_active() && self.pad_legacy_crafting_button(button) {
             if matches!(
                 button,
-                Button::DPadUp | Button::DPadDown | Button::DPadLeft | Button::DPadRight
+                Button::DPadUp
+                    | Button::DPadDown
+                    | Button::DPadLeft
+                    | Button::DPadRight
+                    | Button::South
             ) {
+                self.pad.menu.repeats = 0;
                 self.pad.menu.repeat = Some((button, Instant::now(), false));
+            } else if matches!(button, Button::LeftBumper | Button::RightBumper) {
+                self.pad.menu.repeat = None;
             }
             return Ok(());
         }
@@ -518,12 +562,20 @@ impl Game<'_> {
                     _ => {
                         self.pad_pointer_to(event_loop, focus.center());
                         self.pad_pointer_button(event_loop, false, true);
+                        if self.pad_over_classic_craft_slot() {
+                            self.pad.menu.repeats = 0;
+                            self.pad.menu.repeat = Some((Button::South, Instant::now(), false));
+                        }
                     }
                 }
             }
             Button::South | Button::West => {
                 self.pad_take_pointer(event_loop);
                 self.pad_pointer_button(event_loop, button == Button::West, true);
+                if button == Button::South && self.pad_over_classic_craft_slot() {
+                    self.pad.menu.repeats = 0;
+                    self.pad.menu.repeat = Some((Button::South, Instant::now(), false));
+                }
                 // A on a text field in pointer mode opens the keyboard, as
                 // in focus mode (not the right click).
                 if button == Button::South
@@ -601,20 +653,22 @@ impl Game<'_> {
             return;
         }
         if self.shulkds_title_split_mode()
-            && self.shulkds_title_pad_button(event_loop, button).unwrap_or(false)
+            && self
+                .shulkds_title_pad_button(event_loop, button)
+                .unwrap_or(false)
         {
             return;
         }
         if self.pad_legacy_crafting_active() && self.pad_legacy_crafting_button(button) {
             return;
         }
+        if self.screen == Screen::Creative
+            && self.use_legacy_creative()
+            && self.legacy_creative_pad_scroll_step(button)
+        {
+            return;
+        }
         if self.pad_focus_mode() {
-            if self.screen == Screen::Creative
-                && self.use_legacy_gui()
-                && self.legacy_creative_pad_scroll_step(button)
-            {
-                return;
-            }
             let targets = self.pad_targets();
             if !targets.is_empty() {
                 self.pad_focus_step(event_loop, button, &targets);
@@ -630,8 +684,9 @@ impl Game<'_> {
             self.pad_take_pointer(event_loop);
             return;
         }
-        // With A held (a slider grabbed, a drag), the D-pad nudges instead.
-        if self.pad.menu.held[0] {
+        // With A held on non-container menus (a slider grabbed), the D-pad nudges instead;
+        // inside inventories and creative menus, D-pad still hops slot-to-slot so holding A/X drags cleanly.
+        if pointer_step_nudges_slider(self.pad.menu.held[0], self.title.is_some(), self.screen) {
             let (dx, dy) = match button {
                 Button::DPadLeft => (-2.0, 0.0),
                 Button::DPadRight => (2.0, 0.0),
@@ -795,7 +850,7 @@ impl Game<'_> {
     /// another page of mods' tabs shows its page: clicking where it would be would hit the
     /// tab drawn there on this page.
     fn pad_creative_tab(&mut self, next: bool) {
-        if self.use_legacy_gui() {
+        if self.use_legacy_creative() {
             self.legacy_creative_cycle_tab(next);
             return;
         }
@@ -828,6 +883,7 @@ impl Game<'_> {
             .map_or(0.0, |t| now.duration_since(t).as_secs_f32().min(0.05));
         self.pad.menu.last_poll = Some(now);
         self.key_focus_frame();
+        self.sync_legacy_crafting_session();
         let in_menu =
             self.pad_in_menu() && (self.settings.controller.enabled || self.pad.menu.keyboard);
         if !in_menu {
@@ -946,15 +1002,33 @@ impl Game<'_> {
             }
         }
         if let Some((button, since, repeating)) = self.pad.menu.repeat {
-            let wait = if repeating {
-                REPEAT_EVERY
+            let classic_hold = button == Button::South
+                && !self.pad_legacy_crafting_active()
+                && self.pad.menu.held[0]
+                && self.pad_over_classic_craft_slot();
+            let fast_craft = self.pad_legacy_crafting_active() || classic_hold;
+            if button == Button::South && !fast_craft {
+                self.pad.menu.repeat = None;
             } else {
-                REPEAT_DELAY
-            };
-            if now.duration_since(since).as_secs_f32() >= wait {
-                self.pad.menu.repeat = Some((button, now, true));
-                self.pad.menu.repeats = self.pad.menu.repeats.saturating_add(1);
-                self.pad_step(event_loop, button);
+                let wait =
+                    menu_repeat_interval(button, repeating, self.pad.menu.repeats, fast_craft);
+                if now.duration_since(since).as_secs_f32() >= wait {
+                    if classic_hold {
+                        if self.can_fast_craft_classic_output() {
+                            self.pad.menu.repeat = Some((button, now, true));
+                            self.pad.menu.repeats = self.pad.menu.repeats.saturating_add(1);
+                            self.pad_pointer_button(event_loop, false, false);
+                            self.pad_pointer_button(event_loop, false, true);
+                        } else if self.slot_view(200).is_some() {
+                            // Output is non-empty yet full/incompatible with `carried`: stop fast-craft.
+                            self.pad.menu.repeat = None;
+                        }
+                    } else {
+                        self.pad.menu.repeat = Some((button, now, true));
+                        self.pad.menu.repeats = self.pad.menu.repeats.saturating_add(1);
+                        self.pad_step(event_loop, button);
+                    }
+                }
             }
         }
         self.pad_auto_keyboard();
@@ -1584,6 +1658,21 @@ impl Game<'_> {
             self.draw_pad_focus(batch, focus);
             return;
         }
+        if self.shulkds.config.enabled
+            && self.gui.atlas.sprites.contains_key("shulkds/virtual_mouse")
+        {
+            horizon_client::ui::blit_sprite(
+                batch,
+                &self.gui.atlas,
+                "shulkds/virtual_mouse",
+                x - 8.0,
+                y - 8.0,
+                16.0,
+                16.0,
+                u32::MAX,
+            );
+            return;
+        }
         // An arrow, outlined, pointing up-left at (x, y).
         let atlas = &self.gui.atlas;
         let (x, y) = (x.floor(), y.floor());
@@ -1644,9 +1733,116 @@ fn field_at(targets: &[Target], at: (f32, f32)) -> bool {
     })
 }
 
+/// Resolve controller menu navigation mode, defaulting slot-based GUIs to Virtual Mouse pointer mode.
+fn resolve_pad_focus_mode(
+    keyboard: bool,
+    menu_nav: MenuNav,
+    virtual_mouse_gui_open: bool,
+    swapped: bool,
+) -> bool {
+    let default_focus = !virtual_mouse_gui_open && menu_nav == MenuNav::Focus;
+    keyboard || default_focus != swapped
+}
+
+/// Skip the 2 px D-pad slider nudge on Inventory/Creative screens so holding A/X drags slot-to-slot.
+fn pointer_step_nudges_slider(held_primary: bool, has_title: bool, screen: Screen) -> bool {
+    held_primary && (has_title || !matches!(screen, Screen::Inventory | Screen::Creative))
+}
+
+/// Delay before the next held craft fires, ramping up to turbo rate after 6 repeats.
+pub(super) fn fast_craft_interval(repeating: bool, repeats: u32) -> f32 {
+    if !repeating {
+        FAST_CRAFT_DELAY
+    } else if repeats < 6 {
+        FAST_CRAFT_EVERY
+    } else {
+        FAST_CRAFT_TURBO
+    }
+}
+
+fn menu_repeat_interval(button: Button, repeating: bool, repeats: u32, fast_craft: bool) -> f32 {
+    if fast_craft && button == Button::South {
+        fast_craft_interval(repeating, repeats)
+    } else if repeating {
+        REPEAT_EVERY
+    } else {
+        REPEAT_DELAY
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_craft_repeat_curve_matches_hold_delay_and_turbo() {
+        assert_eq!(menu_repeat_interval(Button::South, false, 0, true), 0.30);
+        assert_eq!(menu_repeat_interval(Button::South, true, 0, true), 0.09);
+        assert_eq!(menu_repeat_interval(Button::South, true, 5, true), 0.09);
+        assert_eq!(menu_repeat_interval(Button::South, true, 6, true), 0.05);
+        assert_eq!(
+            menu_repeat_interval(Button::DPadRight, false, 0, true),
+            0.35
+        );
+        assert_eq!(menu_repeat_interval(Button::DPadRight, true, 6, true), 0.09);
+    }
+
+    #[test]
+    fn slot_guis_default_to_virtual_mouse_pointer() {
+        // Containers, furnaces, stations, classic crafting, and creative use the virtual cursor.
+        assert!(Game::is_virtual_mouse_gui_open(
+            true,
+            false,
+            Screen::Inventory,
+            false
+        ));
+        assert!(Game::is_virtual_mouse_gui_open(
+            true,
+            false,
+            Screen::Creative,
+            false
+        ));
+        // Legacy tabbed crafting, stonecutter strip, and merchant strip stay on their dedicated navigation.
+        assert!(!Game::is_virtual_mouse_gui_open(
+            true,
+            false,
+            Screen::Inventory,
+            true
+        ));
+        // Pause / Options, Title / Sign / Book overlays, and non-ShulkDS desktop/vanilla keep Focus mode.
+        assert!(!Game::is_virtual_mouse_gui_open(
+            true,
+            false,
+            Screen::Options,
+            false
+        ));
+        assert!(!Game::is_virtual_mouse_gui_open(
+            true,
+            true,
+            Screen::Inventory,
+            false
+        ));
+        assert!(!Game::is_virtual_mouse_gui_open(
+            false,
+            false,
+            Screen::Inventory,
+            false
+        ));
+
+        assert!(!resolve_pad_focus_mode(false, MenuNav::Focus, true, false));
+        assert!(resolve_pad_focus_mode(false, MenuNav::Focus, true, true));
+        assert!(resolve_pad_focus_mode(true, MenuNav::Focus, true, false));
+        assert!(resolve_pad_focus_mode(false, MenuNav::Focus, false, false));
+    }
+
+    #[test]
+    fn pointer_step_skips_slider_nudge_in_containers() {
+        assert!(!pointer_step_nudges_slider(true, false, Screen::Inventory));
+        assert!(!pointer_step_nudges_slider(true, false, Screen::Creative));
+        assert!(!pointer_step_nudges_slider(false, false, Screen::Options));
+        assert!(pointer_step_nudges_slider(true, false, Screen::Options));
+        assert!(pointer_step_nudges_slider(true, true, Screen::Inventory));
+    }
 
     #[test]
     fn keyboard_auto_opens_for_pad_on_typing_screen() {

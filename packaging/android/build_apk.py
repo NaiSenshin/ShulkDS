@@ -42,8 +42,8 @@ LABEL = "ShulkDS"
 # CI builds, signed with that repository's test key: the release key stays out of it.
 DEV_SUFFIX = ".dev"
 VARIANTS = {"dev": (DEV_SUFFIX, " Dev"), "preview": (".preview", " Preview")}
-VERSION_NAME = "1.0.1"
-VERSION_CODE = 15
+VERSION_NAME = "1.0.2"
+VERSION_CODE = 24
 MIN_SDK = 26  # AAudio (cpal)
 TARGET_SDK = 35
 PLATFORM = 36
@@ -166,7 +166,10 @@ def assets(out):
     lowbudget.zip, the skin the setup draws the menus with (packaging/lowbudget/pack, made by its
     make.py), and StarlingVisuals.zip, the shader pack the app puts in shaderpacks/ (also left in
     `out` for the release page)."""
-    run(sys.executable, HERE / "build_exporters.py")
+    exporter_script = HERE / "build_exporters.py"
+    if not exporter_script.is_file():
+        exporter_script = ROOT / "tools/build_android_exporters.py"
+    run(sys.executable, exporter_script)
     folder = out / "assets"
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir()

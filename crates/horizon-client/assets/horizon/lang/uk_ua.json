@@ -456,5 +456,18 @@
   "horizon.repro.bundle": "Пакет відтворення: %s",
   "horizon.repro.error": "Відтворення: %s",
   "horizon.repro.no_recording": "Поки немає запису для експорту.",
-  "horizon.repro.replay_started": "Відтворення почато: %s"
+  "horizon.repro.replay_started": "Відтворення почато: %s",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Положення панелі",
+  "horizon.extras.shulkds_hotbar.tooltip": "Виберіть розташування панелі швидкого доступу: внизу нижнього екрана, вгорі нижнього екрана або класично на верхньому.",
+  "horizon.extras.shulkds_classic_crafting": "Класичний крафт",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Використовувати класичну сітку 2x2 і 3x3 з книгою рецептів замість консольного меню.",
+  "horizon.extras.shulkds_classic_inventory": "Класичний інвентар",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Відкривати класичний інвентар виживання та творчості на верхньому екрані натисканням Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Автооновлення",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Перевіряти релізи на GitHub під час запуску ShulkDS і пропонувати встановлення оновлень.",
+  "horizon.shulkds.hotbar.bottom": "Нижній екран (Низ)",
+  "horizon.shulkds.hotbar.top": "Нижній екран (Верх)",
+  "horizon.shulkds.hotbar.classic": "Верхній екран (Класика)",
+  "horizon.shulkds.check_updates": "Перевірити оновлення"
 }

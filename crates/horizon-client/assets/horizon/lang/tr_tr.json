@@ -219,5 +219,18 @@
   "How frames reach the screen, and the performance overlay.": "Karelerin ekrana nasıl ulaştığı ve performans kaplaması.",
   "Brighter-than-white output on an HDR display.": "HDR ekranda beyazdan parlak çıkış.",
   "Results for \"%s\"": "\"%s\" için sonuçlar",
-  "No settings match.": "Eşleşen ayar yok."
+  "No settings match.": "Eşleşen ayar yok.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Kısayol Çubuğu",
+  "horizon.extras.shulkds_hotbar.tooltip": "Oyun içi kısayol çubuğunun nerede görüneceğini seçin: alt ekran altı, alt ekran üstü veya üst ekranda klasik.",
+  "horizon.extras.shulkds_classic_crafting": "Klasik Üretim",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Konsol menüsü yerine tarif kitabıyla klasik Java 2x2 ve 3x3 üretim ızgarasını kullanır.",
+  "horizon.extras.shulkds_classic_inventory": "Klasik Envanter",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Y/E tuşuna basıldığında klasik Hayatta Kalma ve Yaratıcı envanterini üst ekranda açar.",
+  "horizon.extras.shulkds_auto_updates": "Otomatik Güncelleme",
+  "horizon.extras.shulkds_auto_updates.tooltip": "ShulkDS açılışında GitHub sürümlerini kontrol eder ve yeni güncelleme varsa sorar.",
+  "horizon.shulkds.hotbar.bottom": "Alt Ekran (Alt)",
+  "horizon.shulkds.hotbar.top": "Alt Ekran (Üst)",
+  "horizon.shulkds.hotbar.classic": "Üst Ekran (Klasik)",
+  "horizon.shulkds.check_updates": "Güncellemeleri Denetle"
 }

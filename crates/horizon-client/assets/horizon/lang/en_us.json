@@ -626,5 +626,18 @@
   "starling.mods.native.days_ago": "%s days ago",
   "starling.mods.native.next_build": "Next start: with %s, compiled %s.",
   "horizon.mods.not_built_tip": "Installed, not built into this game: build the game with it in the launcher (Settings > Native mods), then play the instance that build is in.",
-  "starling.mods.native.not_built_tip": "Installed, not in this game yet: Compile builds the game with it on Starling's build server."
+  "starling.mods.native.not_built_tip": "Installed, not in this game yet: Compile builds the game with it on Starling's build server.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Hotbar Position",
+  "horizon.extras.shulkds_hotbar.tooltip": "Choose where the gameplay hotbar appears: bottom of the bottom screen, top of the bottom screen, or classic under the XP bar on the top screen.",
+  "horizon.extras.shulkds_classic_crafting": "Classic Crafting",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Use the classic Java manual 2x2 and 3x3 crafting grid with the recipe book instead of the Console Edition tabbed crafting menu.",
+  "horizon.extras.shulkds_classic_inventory": "Classic Inventory",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Open the classic Survival and Creative inventory menus on the top screen when pressing Y/E instead of the bottom-screen touch inventory and Console Creative catalog.",
+  "horizon.extras.shulkds_auto_updates": "Auto Updates",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Check GitHub Releases when ShulkDS starts and prompt to download and install new updates.",
+  "horizon.shulkds.hotbar.bottom": "Bottom Screen (Bottom)",
+  "horizon.shulkds.hotbar.top": "Bottom Screen (Top)",
+  "horizon.shulkds.hotbar.classic": "Top Screen (Classic)",
+  "horizon.shulkds.check_updates": "Check for Updates"
 }

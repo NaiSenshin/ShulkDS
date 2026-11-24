@@ -30,6 +30,7 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
 import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -86,6 +87,7 @@ public class StarlingActivity extends NativeActivity {
 
     /** The build with native mods this game runs (loadGame), or null for the APK's own. */
     private File modBuild;
+    private String pendingUpdateApk;
 
     /** The build with native mods loaded in place of the APK's library (android_lib.rs). */
     private static final String GAME_LIBRARY = "STARLING_GAME_LIBRARY";
@@ -442,6 +444,12 @@ public class StarlingActivity extends NativeActivity {
         applyMaxRefreshRate();
         if (secondaryDisplay != null) {
             secondaryDisplay.resume();
+        }
+        if (pendingUpdateApk != null
+                && (Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls())) {
+            String apk = pendingUpdateApk;
+            pendingUpdateApk = null;
+            launchPackageInstaller(apk);
         }
     }
 
@@ -963,6 +971,11 @@ public class StarlingActivity extends NativeActivity {
         }
     }
 
+    /** This APK's Android applicationId (e.g. dev.shulkds.client or dev.shulkds.client.dev). */
+    public String packageId() {
+        return getPackageName();
+    }
+
     /** Whether this is a release (signed with the release key, not debuggable): only a release
      * can install the next one over itself. */
     public boolean releaseBuild() {
@@ -970,12 +983,7 @@ public class StarlingActivity extends NativeActivity {
                 == 0;
     }
 
-    /**
-     * Android's package installer on an update the game downloaded to files/updates/: it asks the
-     * player to allow installing from Starling the first time, then to update; once installed it
-     * offers to open the game again. False where no installer takes it.
-     */
-    public boolean installUpdate(String name) {
+    private boolean launchPackageInstaller(String name) {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(UpdateProvider.uri(getPackageName(), name), UpdateProvider.TYPE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -985,6 +993,28 @@ public class StarlingActivity extends NativeActivity {
         } catch (ActivityNotFoundException | SecurityException e) {
             return false;
         }
+    }
+
+    /**
+     * Android's package installer on an update the game downloaded to files/updates/: asks the
+     * player to allow unknown app installs if not granted yet, then resumes installation.
+     */
+    public boolean installUpdate(String name) {
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            pendingUpdateApk = name;
+            Intent perm = new Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            perm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(perm);
+                return true;
+            } catch (ActivityNotFoundException | SecurityException e) {
+                pendingUpdateApk = null;
+                return false;
+            }
+        }
+        return launchPackageInstaller(name);
     }
 
     /** The Android Keystore key the account's tokens are sealed with; it never leaves the

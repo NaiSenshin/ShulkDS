@@ -16,10 +16,74 @@ impl Game<'_> {
         self.shulkds.config.enabled
     }
 
+    #[inline]
+    pub(super) fn use_classic_crafting(&self) -> bool {
+        self.settings.extras.shulkds_classic_crafting
+    }
+
+    #[inline]
+    pub(super) fn use_classic_inventory(&self) -> bool {
+        self.settings.extras.shulkds_classic_inventory
+    }
+
+    #[inline]
+    pub(super) fn use_legacy_creative(&self) -> bool {
+        self.use_legacy_gui() && !self.use_classic_inventory()
+    }
+
+    #[inline]
+    pub(super) fn use_legacy_inventory_layout(&self) -> bool {
+        if !self.use_legacy_gui() {
+            return false;
+        }
+        if self.legacy_crafting_open() {
+            return true;
+        }
+        if self.screen == Screen::Creative {
+            return !self.use_classic_inventory();
+        }
+        if self.screen == Screen::Inventory
+            && self.container.is_none()
+            && self.station.is_none()
+            && !self.mount_active()
+        {
+            if self.craft_size == 3 {
+                return !self.use_classic_crafting();
+            }
+            return !self.use_classic_inventory() && !self.use_classic_crafting();
+        }
+        true
+    }
+
+    #[inline]
+    pub(super) fn is_virtual_mouse_gui_open(
+        shulkds_enabled: bool,
+        has_overlay_or_title: bool,
+        screen: Screen,
+        legacy_strip_active: bool,
+    ) -> bool {
+        shulkds_enabled
+            && !has_overlay_or_title
+            && matches!(screen, Screen::Inventory | Screen::Creative)
+            && !legacy_strip_active
+    }
+
+    /// True when a slot-based inventory, container, workstation, classic crafting, or creative GUI is open in ShulkDS mode.
+    #[inline]
+    pub(super) fn shulkds_virtual_mouse_gui_open(&self) -> bool {
+        Self::is_virtual_mouse_gui_open(
+            self.shulkds.config.enabled,
+            self.title.is_some() || self.sign_edit.is_some() || self.book.is_some(),
+            self.screen,
+            self.pad_legacy_crafting_active(),
+        )
+    }
+
     /// True when the open screen should render `LegacyCraftingScreen` (2x2 pocket or 3x3 Crafting Table).
     #[inline]
     pub(super) fn legacy_crafting_open(&self) -> bool {
         self.use_legacy_gui()
+            && !self.use_classic_crafting()
             && self.screen == Screen::Inventory
             && self.container.is_none()
             && self.station.is_none()
@@ -140,14 +204,7 @@ impl Game<'_> {
         self.legacy_recess_color(batch, x, y, w, h, u32::MAX);
     }
 
-    pub(super) fn legacy_entity_panel(
-        &self,
-        batch: &mut HudBatch,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-    ) {
+    pub(super) fn legacy_entity_panel(&self, batch: &mut HudBatch, x: f32, y: f32, w: f32, h: f32) {
         nine_slice_scaled(
             batch,
             &self.gui.atlas,
@@ -227,13 +284,7 @@ impl Game<'_> {
     }
 
     /// Draw a Legacy4J `icon_holder` (or `sizeable_icon_holder` when `< 18px`) at top-left `(x, y)` with size `sz x sz`.
-    pub(super) fn legacy_slot_box(
-        &self,
-        batch: &mut HudBatch,
-        x: f32,
-        y: f32,
-        sz: f32,
-    ) {
+    pub(super) fn legacy_slot_box(&self, batch: &mut HudBatch, x: f32, y: f32, sz: f32) {
         self.legacy_icon_holder(batch, x, y, sz, false, false);
     }
 
@@ -435,10 +486,24 @@ impl Game<'_> {
         h: f32,
         progress: Option<f32>,
     ) {
-        blit_sprite(batch, &self.gui.atlas, "legacy/container/arrow", x, y, w, h, u32::MAX);
+        blit_sprite(
+            batch,
+            &self.gui.atlas,
+            "legacy/container/arrow",
+            x,
+            y,
+            w,
+            h,
+            u32::MAX,
+        );
         if let Some(p) = progress
             && p > 0.0
-            && let Some(mut r) = self.gui.atlas.sprites.get("legacy/container/full_arrow").copied()
+            && let Some(mut r) = self
+                .gui
+                .atlas
+                .sprites
+                .get("legacy/container/full_arrow")
+                .copied()
         {
             let frac = p.clamp(0.0, 1.0);
             r.u1 = r.u0 + (r.u1 - r.u0) * frac;
@@ -455,7 +520,16 @@ impl Game<'_> {
         size: f32,
         progress: Option<f32>,
     ) {
-        blit_sprite(batch, &self.gui.atlas, "legacy/container/lit", x, y, size, size, u32::MAX);
+        blit_sprite(
+            batch,
+            &self.gui.atlas,
+            "legacy/container/lit",
+            x,
+            y,
+            size,
+            size,
+            u32::MAX,
+        );
         if let Some(p) = progress
             && p > 0.0
             && let Some(mut r) = self
@@ -516,7 +590,7 @@ impl Game<'_> {
         ix: f32,
         iy: f32,
     ) {
-        if !self.use_legacy_gui() {
+        if !self.use_legacy_inventory_layout() {
             self.draw_slot_item(batch, drag, slot, stack, ix, iy);
             return;
         }
@@ -536,7 +610,7 @@ impl Game<'_> {
 
     /// Legacy4J HD slot box dimension (`16.0`, `21.0`, `23.0`, `27.0`, `30.0`, `32.0`) for slot `i`.
     pub(super) fn legacy_slot_size_for(&self, i: usize) -> f32 {
-        if !self.use_legacy_gui() {
+        if !self.use_legacy_inventory_layout() {
             return 18.0;
         }
         if self.screen == Screen::Creative {
@@ -571,7 +645,7 @@ impl Game<'_> {
 
     /// Exact Legacy4J HD panel dimensions `(width, height)` for centering & bounds.
     pub(super) fn legacy_screen_dimensions(&self) -> Option<(f32, f32)> {
-        if !self.use_legacy_gui() {
+        if !self.use_legacy_inventory_layout() {
             return None;
         }
         if self.screen == Screen::Creative {
@@ -579,7 +653,9 @@ impl Game<'_> {
         }
         if let Some(s) = self.station.as_ref() {
             return Some(match s.kind {
-                StationKind::Anvil | StationKind::Grindstone | StationKind::Smithing => (207.0, 215.0),
+                StationKind::Anvil | StationKind::Grindstone | StationKind::Smithing => {
+                    (207.0, 215.0)
+                }
                 StationKind::Cartography => (207.0, 254.0),
                 StationKind::Beacon => (260.0, 255.0),
                 StationKind::Stonecutter => (348.0, 215.0),
@@ -636,7 +712,7 @@ impl Game<'_> {
 
     /// Legacy4J 16x16 item draw top-left coordinate `(ix, iy)` relative to `(ox, oy)`.
     pub(super) fn legacy_slot_position(&self, i: usize) -> Option<(f32, f32)> {
-        if !self.use_legacy_gui() {
+        if !self.use_legacy_inventory_layout() {
             return None;
         }
         let center_16 = |x: f32, y: f32, sz: f32| (x + (sz - 16.0) * 0.5, y + (sz - 16.0) * 0.5);

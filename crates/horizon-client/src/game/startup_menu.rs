@@ -870,7 +870,8 @@ impl Loading {
                 | Event::ToggleRecording
                 | Event::ExportRepro
                 | Event::ListMusicTracks
-                | Event::PlayMusicTrack(..) => {}
+                | Event::PlayMusicTrack(..)
+                | Event::CheckUpdates => {}
             }
         }
     }

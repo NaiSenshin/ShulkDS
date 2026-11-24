@@ -116,7 +116,12 @@ impl Game<'_> {
         };
         let registry = self.items();
         if tab.id == "legacy:search" {
-            let q = self.legacy_creative.search.value.trim().to_ascii_lowercase();
+            let q = self
+                .legacy_creative
+                .search
+                .value
+                .trim()
+                .to_ascii_lowercase();
             let mut all = Vec::new();
             let mut seen = HashSet::new();
             for t in tabs {
@@ -271,7 +276,9 @@ impl Game<'_> {
             self.legacy_creative.search.height = 18.0;
             self.legacy_creative.search.focused = true;
             self.legacy_creative.search.bordered = true;
-            self.legacy_creative.search.draw(batch, &self.gui.atlas, None);
+            self.legacy_creative
+                .search
+                .draw(batch, &self.gui.atlas, None);
         } else {
             let atlas = &self.gui.atlas;
             let tw = HudBatch::text_width(atlas, &title_str);
@@ -435,7 +442,9 @@ impl Game<'_> {
                 self.legacy_creative.search.x = sx;
                 self.legacy_creative.search.y = sy;
                 self.legacy_creative.search.width = 200.0;
-                self.legacy_creative.search.click(&self.gui.atlas, mx, shift, false);
+                self.legacy_creative
+                    .search
+                    .click(&self.gui.atlas, mx, shift, false);
                 return;
             }
         }
@@ -445,12 +454,7 @@ impl Game<'_> {
         let slot_scroll = self.legacy_creative.scroll_rows[tab_idx].min(max_scroll);
 
         // 4. Scroller track press.
-        if !right
-            && mx >= ox + 294.0
-            && mx < ox + 312.0
-            && my >= oy + 16.0
-            && my < oy + 175.0
-        {
+        if !right && mx >= ox + 294.0 && mx < ox + 312.0 && my >= oy + 16.0 && my < oy + 175.0 {
             self.legacy_creative.dragging_scroll = true;
             if max_scroll > 0 {
                 let frac = ((my - (oy + 27.0) - 7.0) / (135.0 - 15.0)).clamp(0.0, 1.0);
@@ -462,7 +466,10 @@ impl Game<'_> {
 
         // 5. 50-slot item grid (`20 + c*27, 29 + r*27, 27x27`).
         let carried_cap = self.carried.as_ref().map_or(64, |c| {
-            self.items().get(&c.item).map_or(64, |it| it.max_stack).max(1)
+            self.items()
+                .get(&c.item)
+                .map_or(64, |it| it.max_stack)
+                .max(1)
         });
         for i in 0..50 {
             let sx = ox + 20.0 + (i % 10) as f32 * 27.0;
@@ -493,7 +500,10 @@ impl Game<'_> {
                         let stack = ItemStack::new(id, cap);
                         if let Some(dest) = self.inventory[0..9]
                             .iter()
-                            .position(|s| s.as_ref().is_some_and(|e| e.item == stack.item && e.count < cap))
+                            .position(|s| {
+                                s.as_ref()
+                                    .is_some_and(|e| e.item == stack.item && e.count < cap)
+                            })
                             .or_else(|| self.inventory[0..9].iter().position(Option::is_none))
                         {
                             self.inventory[dest] = Some(stack);
@@ -549,7 +559,8 @@ impl Game<'_> {
                             .map_or(64, |it| it.max_stack)
                             .max(1);
                         if hand.same_item_same_components(&slot_stack) {
-                            let add = if right { 1 } else { hand.count }.min(cap.saturating_sub(slot_stack.count));
+                            let add = if right { 1 } else { hand.count }
+                                .min(cap.saturating_sub(slot_stack.count));
                             slot_stack.count += add;
                             hand.count -= add;
                             self.inventory[i] = Some(slot_stack);
@@ -602,15 +613,20 @@ impl Game<'_> {
             return;
         }
         let tab_idx = self.legacy_creative.tab.min(tabs.len() - 1);
-        let max_scroll = self.creative_tab_items(tab_idx).len().div_ceil(10).saturating_sub(5);
+        let max_scroll = self
+            .creative_tab_items(tab_idx)
+            .len()
+            .div_ceil(10)
+            .saturating_sub(5);
         let cur = self.legacy_creative.scroll_rows[tab_idx] as isize;
         let step = if d > 0.0 { -1 } else { 1 };
-        self.legacy_creative.scroll_rows[tab_idx] = (cur + step).clamp(0, max_scroll as isize) as usize;
+        self.legacy_creative.scroll_rows[tab_idx] =
+            (cur + step).clamp(0, max_scroll as isize) as usize;
     }
 
     pub(super) fn key_legacy_creative(&mut self, event: &KeyEvent) -> bool {
         if self.screen != Screen::Creative
-            || !self.use_legacy_gui()
+            || !self.use_legacy_creative()
             || event.state != ElementState::Pressed
         {
             return false;
@@ -700,7 +716,10 @@ impl Game<'_> {
         Some([ox + 20.0, oy + 29.0, 27.0, 27.0])
     }
 
-    pub(super) fn legacy_creative_targets(&self, batch: &HudBatch) -> Vec<horizon_client::widgets::Target> {
+    pub(super) fn legacy_creative_targets(
+        &self,
+        batch: &HudBatch,
+    ) -> Vec<horizon_client::widgets::Target> {
         use horizon_client::widgets::{Kind, Target};
         let tabs = creative_tabs();
         if tabs.is_empty() {
@@ -713,7 +732,12 @@ impl Game<'_> {
         for r in 0..5 {
             for c in 0..10 {
                 out.push(Target {
-                    rect: [ox + 20.0 + c as f32 * 27.0, oy + 29.0 + r as f32 * 27.0, 27.0, 27.0],
+                    rect: [
+                        ox + 20.0 + c as f32 * 27.0,
+                        oy + 29.0 + r as f32 * 27.0,
+                        27.0,
+                        27.0,
+                    ],
                     kind: Kind::Slot,
                 });
             }
@@ -744,21 +768,36 @@ impl Game<'_> {
         out
     }
 
-    pub(super) fn legacy_creative_pad_scroll_step(&mut self, button: horizon_client::gamepad::Button) -> bool {
+    pub(super) fn legacy_creative_pad_scroll_step(
+        &mut self,
+        button: horizon_client::gamepad::Button,
+    ) -> bool {
         use horizon_client::gamepad::Button;
-        if self.screen != Screen::Creative || !self.use_legacy_gui() {
+        if self.screen != Screen::Creative || !self.use_legacy_creative() {
             return false;
         }
         if !matches!(button, Button::DPadUp | Button::DPadDown) {
             return false;
         }
-        let Some(focus) = self.pad.menu.focus else {
-            return false;
-        };
         let Some(batch) = self.gui_scale() else {
             return false;
         };
-        let Some((_, oy)) = self.legacy_screen_origin(&batch) else {
+        let Some((ox, oy)) = self.legacy_screen_origin(&batch) else {
+            return false;
+        };
+        let (on_top_row, on_bottom_row) = if let Some(focus) = self.pad.menu.focus {
+            (
+                (focus.rect[1] - (oy + 29.0)).abs() < 2.0,
+                (focus.rect[1] - (oy + 29.0 + 4.0 * 27.0)).abs() < 2.0,
+            )
+        } else if self.pad.menu.pos.is_some() {
+            let (cx, cy) = self.cursor;
+            let in_grid_x = cx >= ox + 20.0 && cx < ox + 290.0;
+            (
+                in_grid_x && cy >= oy + 29.0 && cy < oy + 56.0,
+                in_grid_x && cy >= oy + 29.0 + 4.0 * 27.0 && cy < oy + 29.0 + 5.0 * 27.0,
+            )
+        } else {
             return false;
         };
         let tabs = creative_tabs();
@@ -766,20 +805,21 @@ impl Game<'_> {
             return false;
         }
         let tab_idx = self.legacy_creative.tab.min(tabs.len() - 1);
-        let max_scroll = self.creative_tab_items(tab_idx).len().div_ceil(10).saturating_sub(5);
+        let max_scroll = self
+            .creative_tab_items(tab_idx)
+            .len()
+            .div_ceil(10)
+            .saturating_sub(5);
         if max_scroll == 0 {
             return false;
         }
         let scroll = self.legacy_creative.scroll_rows[tab_idx].min(max_scroll);
-        if button == Button::DPadUp && (focus.rect[1] - (oy + 29.0)).abs() < 2.0 && scroll > 0 {
+        if button == Button::DPadUp && on_top_row && scroll > 0 {
             self.legacy_creative.scroll_rows[tab_idx] = scroll - 1;
             self.audio.play_button_click();
             return true;
         }
-        if button == Button::DPadDown
-            && (focus.rect[1] - (oy + 29.0 + 4.0 * 27.0)).abs() < 2.0
-            && scroll < max_scroll
-        {
+        if button == Button::DPadDown && on_bottom_row && scroll < max_scroll {
             self.legacy_creative.scroll_rows[tab_idx] = scroll + 1;
             self.audio.play_button_click();
             return true;

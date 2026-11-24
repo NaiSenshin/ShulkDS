@@ -11,6 +11,15 @@
 /// The repositories, as GitHub's API names them.
 pub const REPOSITORIES: [&str; 1] = ["NaiSenshin/ShulkDS"];
 
+/// Resolves `(repositories, asset_prefix, allow_override)` for an Android `applicationId`.
+/// Release builds (`dev.shulkds.client`) query `REPOSITORIES` (`NaiSenshin/ShulkDS`) with prefix
+/// `"shulkds"`.
+pub fn channel_for_package(
+    _package_id: Option<&str>,
+) -> (&'static [&'static str], &'static str, bool) {
+    (&REPOSITORIES, "shulkds", false)
+}
+
 /// A repository's latest release, as GitHub's API serves it.
 pub fn latest_url(repository: &str) -> String {
     format!("https://api.github.com/repos/{repository}/releases/latest")
@@ -32,17 +41,22 @@ pub fn newer(latest: &str, current: &str) -> bool {
     numbers(latest) > numbers(current)
 }
 
-/// A Starling release's APK.
+/// A ShulkDS release's APK.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Update {
-    /// Without its `v`: `0.8.0`.
+    /// Without its `v`: `1.0.2`.
     pub version: String,
-    /// The APK's file name, its download and its size.
+    /// The APK's file name, its download URLs and its size.
     pub name: String,
     pub url: String,
+    /// GitHub API asset endpoint (`assets/{id}`) for authenticated `application/octet-stream` fetches.
+    pub api_asset_url: String,
+    pub sums_url: Option<String>,
     pub size: u64,
     /// The SHA-256 GitHub gives for it (hex), checked after the download.
     pub sha256: Option<String>,
+    /// Short bullet lines extracted from the release body `## Highlights` section.
+    pub highlights: Vec<String>,
 }
 
 /// The Android ABI of this process (not every ABI the device can run).
@@ -72,30 +86,133 @@ pub fn update_in(latest: &serde_json::Value, current: &str) -> Option<Update> {
     update_for_abi(latest, current, process_abi())
 }
 
-fn update_for_abi(latest: &serde_json::Value, current: &str, abi: &str) -> Option<Update> {
+/// Like [`update_in`], matching APKs named `{prefix}-{version}-{abi}.apk` or `{prefix}-{abi}.apk`.
+pub fn update_in_with_prefix(
+    latest: &serde_json::Value,
+    current: &str,
+    abi: &str,
+    prefix: &str,
+) -> Option<Update> {
     let tag = latest["tag_name"].as_str()?;
     if !newer(tag, current) {
         return None;
     }
     let version = tag.trim_start_matches('v');
-    let name = format!("shulkds-{version}-{abi}.apk");
-    let apk = latest["assets"]
-        .as_array()?
-        .iter()
-        .find(|a| a["name"].as_str() == Some(name.as_str()))?;
+    let versioned = format!("{prefix}-{version}-{abi}.apk");
+    let unversioned = format!("{prefix}-{abi}.apk");
+    let assets = latest["assets"].as_array()?;
+    let apk = assets.iter().find(|a| {
+        matches!(
+            a["name"].as_str(),
+            Some(n) if n == versioned || n == unversioned
+        )
+    })?;
+    let url = apk["browser_download_url"]
+        .as_str()
+        .filter(|u| u.starts_with("https://"))?
+        .to_owned();
+    let api_asset_url = apk["url"]
+        .as_str()
+        .filter(|u| u.starts_with("https://"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| url.clone());
+    let sums_url = assets.iter().find_map(|a| {
+        if a["name"].as_str() == Some("SHA256SUMS.txt") {
+            a["url"]
+                .as_str()
+                .or_else(|| a["browser_download_url"].as_str())
+                .filter(|u| u.starts_with("https://"))
+                .map(str::to_owned)
+        } else {
+            None
+        }
+    });
+    let highlights = release_highlights(latest["body"].as_str().unwrap_or(""));
     Some(Update {
         version: version.to_owned(),
         name: apk["name"].as_str()?.to_owned(),
-        url: apk["browser_download_url"]
-            .as_str()
-            .filter(|u| u.starts_with("https://"))?
-            .to_owned(),
+        url,
+        api_asset_url,
+        sums_url,
         size: apk["size"].as_u64().unwrap_or(0),
         sha256: apk["digest"]
             .as_str()
             .and_then(|d| d.strip_prefix("sha256:"))
             .map(str::to_owned),
+        highlights,
     })
+}
+
+fn update_for_abi(latest: &serde_json::Value, current: &str, abi: &str) -> Option<Update> {
+    update_in_with_prefix(latest, current, abi, "shulkds")
+}
+
+/// Extract up to 6 concise bullet points from a release body's `## Highlights` section.
+fn release_highlights(body: &str) -> Vec<String> {
+    let mut in_highlights = false;
+    let mut section_bullets = Vec::new();
+    let mut fallback_bullets = Vec::new();
+    for raw in body.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            let heading = line.trim_start_matches('#').trim().to_ascii_lowercase();
+            if in_highlights {
+                break;
+            }
+            in_highlights = heading == "highlights";
+            continue;
+        }
+        let bullet = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if let Some(b) = bullet {
+            let clean = b.replace("**", "").replace('`', "");
+            if in_highlights {
+                section_bullets.push(clean);
+                if section_bullets.len() >= 6 {
+                    break;
+                }
+            } else if fallback_bullets.len() < 6 {
+                fallback_bullets.push(clean);
+            }
+        }
+    }
+    if section_bullets.is_empty() {
+        fallback_bullets
+    } else {
+        section_bullets
+    }
+}
+
+/// Parse `<64-hex>  <filename>` from `SHA256SUMS.txt` into a 32-byte digest.
+pub fn sha256_from_sums(sums_text: &str, asset_name: &str) -> Option<[u8; 32]> {
+    let base = asset_name.rsplit('/').next().unwrap_or(asset_name);
+    for line in sums_text.lines() {
+        let line = line.trim();
+        if line.len() < 66 {
+            continue;
+        }
+        let (hex_part, rest) = line.split_at(64);
+        if !rest.starts_with(' ') && !rest.starts_with('\t') {
+            continue;
+        }
+        let file_part = rest.trim_start().trim_start_matches('*');
+        let file_base = file_part.rsplit('/').next().unwrap_or(file_part);
+        if file_part != asset_name && file_base != base {
+            continue;
+        }
+        if !hex_part.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let mut out = [0u8; 32];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = u8::from_str_radix(&hex_part[i * 2..i * 2 + 2], 16).ok()?;
+        }
+        return Some(out);
+    }
+    None
 }
 
 /// The newest of the updates the repositories offer; the first of two of one version.
@@ -326,7 +443,8 @@ mod tests {
             json!({"tag_name": "v0.7.8", "assets": [asset("Horizon-Android-0.7.8-arm64-v8a.apk")]});
         assert_eq!(update_for_abi(&horizon, "0.2.2", "arm64-v8a"), None);
         // A preview build is another app, signed with another key.
-        let preview = json!({"tag_name": "v0.8.0", "assets": [asset("shulkds-preview-0.8.0-arm64-v8a.apk")]});
+        let preview =
+            json!({"tag_name": "v0.8.0", "assets": [asset("shulkds-preview-0.8.0-arm64-v8a.apk")]});
         assert_eq!(update_for_abi(&preview, "0.2.2", "arm64-v8a"), None);
         let release = json!({"tag_name": "v0.8.0", "assets": [
             asset("shulkds-preview-0.8.0-arm64-v8a.apk"),
@@ -350,8 +468,11 @@ mod tests {
             version: version.into(),
             name: format!("shulkds-{version}-arm64-v8a.apk"),
             url: url.into(),
+            api_asset_url: url.into(),
+            sums_url: None,
             size: 1,
             sha256: None,
+            highlights: Vec::new(),
         };
         let org = update("0.8.0", "org");
         let own = update("0.2.3", "own");
@@ -361,6 +482,80 @@ mod tests {
             "org"
         );
         assert_eq!(newest([]), None);
+    }
+
+    #[test]
+    fn update_in_with_prefix_extracts_apk_highlights_and_sums() {
+        let release = json!({
+            "tag_name": "v1.0.2",
+            "body": "Summary line.\n\n## Highlights\n- **Hotbar position**: Pick bottom, top, or classic.\n- **AYN Thor scaling**: Sharper bottom screen layout.\n\n## Install\n- Download APK.\n",
+            "assets": [
+                {
+                    "name": "SHA256SUMS.txt",
+                    "url": "https://api.github.com/repos/NaiSenshin/ShulkDS/releases/assets/99",
+                    "browser_download_url": "https://github.com/NaiSenshin/ShulkDS/releases/download/v1.0.2/SHA256SUMS.txt",
+                    "size": 120
+                },
+                {
+                    "name": "shulkds-1.0.2-arm64-v8a.apk",
+                    "url": "https://api.github.com/repos/NaiSenshin/ShulkDS/releases/assets/100",
+                    "browser_download_url": "https://github.com/NaiSenshin/ShulkDS/releases/download/v1.0.2/shulkds-1.0.2-arm64-v8a.apk",
+                    "size": 52_000_000
+                }
+            ]
+        });
+        assert!(update_in_with_prefix(&release, "1.0.1", "arm64-v8a", "other").is_none());
+        let u = update_in_with_prefix(&release, "1.0.1", "arm64-v8a", "shulkds").unwrap();
+        assert_eq!(u.version, "1.0.2");
+        assert_eq!(u.name, "shulkds-1.0.2-arm64-v8a.apk");
+        assert_eq!(
+            u.api_asset_url,
+            "https://api.github.com/repos/NaiSenshin/ShulkDS/releases/assets/100"
+        );
+        assert_eq!(
+            u.sums_url.as_deref(),
+            Some("https://api.github.com/repos/NaiSenshin/ShulkDS/releases/assets/99")
+        );
+        assert_eq!(
+            u.highlights,
+            vec![
+                "Hotbar position: Pick bottom, top, or classic.",
+                "AYN Thor scaling: Sharper bottom screen layout.",
+            ]
+        );
+    }
+
+    #[test]
+    fn sha256_from_sums_parses_standard_lines() {
+        let hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let text = format!("{hex}  shulkds-1.0.2-arm64-v8a.apk\n");
+        let parsed = sha256_from_sums(&text, "shulkds-1.0.2-arm64-v8a.apk").unwrap();
+        let got_hex: String = parsed.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(got_hex, hex);
+        assert_eq!(sha256_from_sums(&text, "other.apk"), None);
+    }
+
+    #[test]
+    fn four_part_version_compares_against_three_part_version() {
+        assert!(newer("v1.0.2.1", "1.0.2"));
+        assert!(!newer("v1.0.2.1", "1.0.2.1"));
+        assert!(newer("v1.0.3", "1.0.2.1"));
+    }
+
+    #[test]
+    fn release_package_locks_to_public_github() {
+        assert_eq!(
+            channel_for_package(Some("dev.shulkds.client")),
+            (&["NaiSenshin/ShulkDS"][..], "shulkds", false)
+        );
+        assert_eq!(
+            channel_for_package(None),
+            (&["NaiSenshin/ShulkDS"][..], "shulkds", false)
+        );
+        assert_eq!(
+            latest_url(REPOSITORIES[0]),
+            "https://api.github.com/repos/NaiSenshin/ShulkDS/releases/latest"
+        );
     }
 
     #[test]

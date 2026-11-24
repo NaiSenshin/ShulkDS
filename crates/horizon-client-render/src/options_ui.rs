@@ -1866,6 +1866,8 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    /// ShulkDS: manually trigger a GitHub release update check.
+    CheckUpdates,
     /// Skin Customization: the next skin of `skins/`, the other model, the system's file picker
     /// (phones), the folder, Ely.by's skins.
     NextSkin,
@@ -2045,6 +2047,8 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// ShulkDS: manually check for app updates on GitHub.
+    CheckUpdates,
     /// The AI Agent page's recording button: start or stop.
     ToggleRecording,
     /// The AI Agent page's export button.
@@ -3441,7 +3445,7 @@ impl OptionsUi {
                 // buttons; each opens one of Horizon's settings pages.
                 let open =
                     |key: &str, page: Page| button(0.0, 0.0, 150.0, tr(key), Act::Push(page));
-                vec![
+                let mut rows = vec![
                     Row::Buttons(
                         open("horizon.pages.open.graphics", Page::Graphics),
                         Some(open(
@@ -3485,14 +3489,35 @@ impl OptionsUi {
                             )
                         }
                     },
-                ]
-                .into_iter()
-                .chain(
-                    (!s.extras.no_ai).then(|| {
-                        Row::Buttons(self.extra_button(s, crate::extras::Item::NoAi), None)
-                    }),
-                )
-                .collect()
+                ];
+                if !s.extras.no_ai {
+                    rows.push(Row::Buttons(
+                        self.extra_button(s, crate::extras::Item::NoAi),
+                        None,
+                    ));
+                }
+                rows.push(Row::Header("horizon.extras.header.shulkds"));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::ShulkdsHotbar),
+                    Some(self.extra_button(s, crate::extras::Item::ShulkdsClassicCrafting)),
+                ));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::ShulkdsClassicInventory),
+                    Some(self.extra_button(s, crate::extras::Item::ShulkdsAutoUpdates)),
+                ));
+                if cfg!(target_os = "android") {
+                    rows.push(Row::Buttons(
+                        button(
+                            0.0,
+                            0.0,
+                            150.0,
+                            tr("horizon.shulkds.check_updates"),
+                            Act::CheckUpdates,
+                        ),
+                        None,
+                    ));
+                }
+                rows
             }
             Page::Agent => {
                 let mut rows = vec![Row::Buttons(
@@ -6224,6 +6249,7 @@ impl OptionsUi {
                         Act::BedrockInventory => s.bedrock_inventory = !s.bedrock_inventory,
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::CheckUpdates => events.push(Event::CheckUpdates),
                         Act::NextSkin => {
                             let page = &mut self.skin;
                             page.choice.file =
@@ -7358,6 +7384,7 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::CheckUpdates => events.push(Event::CheckUpdates),
                         Act::ToggleRecording => events.push(Event::ToggleRecording),
                         Act::DiagnosticsExport => events.push(Event::DiagnosticsExport),
                         Act::DiagnosticsOpen => events.push(Event::DiagnosticsOpen),

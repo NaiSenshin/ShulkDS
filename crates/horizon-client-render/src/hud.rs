@@ -1199,87 +1199,334 @@ impl HudAtlas {
         ));
         // Legacy4J UI sprites embedded for ShulkDS bottom-screen & controller menus.
         let legacy_sprites: &[(&str, &[u8])] = &[
-            ("legacy/tiles/panel", include_bytes!("../assets/legacy/tiles/panel.png")),
-            ("legacy/tiles/panel_recess", include_bytes!("../assets/legacy/tiles/panel_recess.png")),
-            ("legacy/tiles/entity_panel", include_bytes!("../assets/legacy/tiles/entity_panel.png")),
-            ("legacy/tiles/high_tab_left", include_bytes!("../assets/legacy/tiles/high_tab_left.png")),
-            ("legacy/tiles/high_tab_middle", include_bytes!("../assets/legacy/tiles/high_tab_middle.png")),
-            ("legacy/tiles/high_tab_right", include_bytes!("../assets/legacy/tiles/high_tab_right.png")),
-            ("legacy/tiles/low_tab", include_bytes!("../assets/legacy/tiles/low_tab.png")),
-            ("legacy/container/button_slot", include_bytes!("../assets/legacy/container/button_slot.png")),
-            ("legacy/container/button_slot_highlighted", include_bytes!("../assets/legacy/container/button_slot_highlighted.png")),
-            ("legacy/container/button_slot_selected", include_bytes!("../assets/legacy/container/button_slot_selected.png")),
-            ("legacy/container/crafting_selection", include_bytes!("../assets/legacy/container/crafting_selection.png")),
-            ("legacy/container/arrow", include_bytes!("../assets/legacy/container/arrow.png")),
-            ("legacy/container/full_arrow", include_bytes!("../assets/legacy/container/full_arrow.png")),
-            ("legacy/container/head_slot", include_bytes!("../assets/legacy/container/head_slot.png")),
-            ("legacy/container/armor_slot", include_bytes!("../assets/legacy/container/armor_slot.png")),
-            ("legacy/container/brewing_slots", include_bytes!("../assets/legacy/container/brewing_slots.png")),
-            ("legacy/container/anvil_hammer", include_bytes!("../assets/legacy/container/anvil_hammer.png")),
-            ("legacy/hud/hotbar_selection", include_bytes!("../assets/legacy/hud/hotbar_selection.png")),
-            ("legacy/container/lit", include_bytes!("../assets/legacy/container/lit.png")),
-            ("legacy/container/lit_progress", include_bytes!("../assets/legacy/container/lit_progress.png")),
-            ("legacy/container/combiner_plus", include_bytes!("../assets/legacy/container/combiner_plus.png")),
-            ("legacy/container/error_cross", include_bytes!("../assets/legacy/container/error_cross.png")),
-            ("legacy/container/smithing_hammer", include_bytes!("../assets/legacy/container/smithing_hammer.png")),
-            ("legacy/container/brewing_coil_flame", include_bytes!("../assets/legacy/container/brewing_coil_flame.png")),
-            ("legacy/container/brewing_fuel_slot", include_bytes!("../assets/legacy/container/brewing_fuel_slot.png")),
-            ("legacy/container/enchanting_slot", include_bytes!("../assets/legacy/container/enchanting_slot.png")),
-            ("legacy/container/enchantment_button_active", include_bytes!("../assets/legacy/container/enchantment_button_active.png")),
-            ("legacy/container/enchantment_button_empty", include_bytes!("../assets/legacy/container/enchantment_button_empty.png")),
-            ("legacy/container/enchantment_button_selected", include_bytes!("../assets/legacy/container/enchantment_button_selected.png")),
-            ("legacy/container/cartography_table_copy", include_bytes!("../assets/legacy/container/cartography_table_copy.png")),
-            ("legacy/container/cartography_table_empty", include_bytes!("../assets/legacy/container/cartography_table_empty.png")),
-            ("legacy/container/cartography_table_glass", include_bytes!("../assets/legacy/container/cartography_table_glass.png")),
-            ("legacy/container/cartography_table_map", include_bytes!("../assets/legacy/container/cartography_table_map.png")),
-            ("legacy/container/cartography_table_zoom", include_bytes!("../assets/legacy/container/cartography_table_zoom.png")),
-            ("legacy/container/beacon_1", include_bytes!("../assets/legacy/container/beacon_1.png")),
-            ("legacy/container/beacon_2", include_bytes!("../assets/legacy/container/beacon_2.png")),
-            ("legacy/container/beacon_3", include_bytes!("../assets/legacy/container/beacon_3.png")),
-            ("legacy/container/beacon_4", include_bytes!("../assets/legacy/container/beacon_4.png")),
-            ("legacy/container/beacon_check", include_bytes!("../assets/legacy/container/beacon_check.png")),
-            ("legacy/container/crafter_slot", include_bytes!("../assets/legacy/container/crafter_slot.png")),
-            ("legacy/container/disabled_crafter_slot", include_bytes!("../assets/legacy/container/disabled_crafter_slot.png")),
-            ("legacy/container/non_interactive_result_slot", include_bytes!("../assets/legacy/container/non_interactive_result_slot.png")),
-            ("legacy/container/chest_slot", include_bytes!("../assets/legacy/container/chest_slot.png")),
-            ("legacy/container/legs_slot", include_bytes!("../assets/legacy/container/legs_slot.png")),
-            ("legacy/container/feet_slot", include_bytes!("../assets/legacy/container/feet_slot.png")),
-            ("legacy/container/shield_slot", include_bytes!("../assets/legacy/container/shield_slot.png")),
-            ("legacy/container/saddle_slot", include_bytes!("../assets/legacy/container/saddle_slot.png")),
-            ("legacy/container/llama_armor_slot", include_bytes!("../assets/legacy/container/llama_armor_slot.png")),
-            ("legacy/container/slot_highlight", include_bytes!("../assets/legacy/container/slot_highlight.png")),
-            ("legacy/tiles/small_panel", include_bytes!("../assets/legacy/tiles/small_panel.png")),
-            ("legacy/tiles/creative_panel", include_bytes!("../assets/legacy/tiles/creative_panel.png")),
-            ("legacy/tiles/square_recessed_panel", include_bytes!("../assets/legacy/tiles/square_recessed_panel.png")),
-            ("legacy/tiles/square_entity_panel", include_bytes!("../assets/legacy/tiles/square_entity_panel.png")),
-            ("legacy/container/icon_holder", include_bytes!("../assets/legacy/container/icon_holder.png")),
-            ("legacy/container/sizeable_icon_holder", include_bytes!("../assets/legacy/container/sizeable_icon_holder.png")),
-            ("legacy/container/red_icon_holder", include_bytes!("../assets/legacy/container/red_icon_holder.png")),
-            ("legacy/container/gray_icon_holder", include_bytes!("../assets/legacy/container/gray_icon_holder.png")),
-            ("legacy/container/icon_warning", include_bytes!("../assets/legacy/container/icon_warning.png")),
-            ("legacy/container/crafting_2_slots_selection", include_bytes!("../assets/legacy/container/crafting_2_slots_selection.png")),
-            ("legacy/container/select_icon_highlight", include_bytes!("../assets/legacy/container/select_icon_highlight.png")),
-            ("legacy/container/small_arrow", include_bytes!("../assets/legacy/container/small_arrow.png")),
-            ("legacy/container/full_small_arrow", include_bytes!("../assets/legacy/container/full_small_arrow.png")),
-            ("legacy/container/padlock", include_bytes!("../assets/legacy/container/padlock.png")),
-            ("legacy/container/experience_bar_result", include_bytes!("../assets/legacy/container/experience_bar_result.png")),
-            ("legacy/icon/structures", include_bytes!("../assets/legacy/icon/structures.png")),
-            ("legacy/icon/decoration", include_bytes!("../assets/legacy/icon/decoration.png")),
-            ("legacy/icon/redstone_and_transport", include_bytes!("../assets/legacy/icon/redstone_and_transport.png")),
-            ("legacy/icon/materials", include_bytes!("../assets/legacy/icon/materials.png")),
-            ("legacy/icon/food", include_bytes!("../assets/legacy/icon/food.png")),
-            ("legacy/icon/tools", include_bytes!("../assets/legacy/icon/tools.png")),
-            ("legacy/icon/armour", include_bytes!("../assets/legacy/icon/armour.png")),
-            ("legacy/icon/mechanisms", include_bytes!("../assets/legacy/icon/mechanisms.png")),
-            ("legacy/icon/transport", include_bytes!("../assets/legacy/icon/transport.png")),
-            ("legacy/icon/brewing", include_bytes!("../assets/legacy/icon/brewing.png")),
-            ("legacy/icon/misc", include_bytes!("../assets/legacy/icon/misc.png")),
-            ("legacy/icon/search", include_bytes!("../assets/legacy/icon/search.png")),
-            ("legacy/widget/scroll_left", include_bytes!("../assets/legacy/widget/scroll_left.png")),
-            ("legacy/widget/scroll_right", include_bytes!("../assets/legacy/widget/scroll_right.png")),
-            ("legacy/widget/scroll_up", include_bytes!("../assets/legacy/widget/scroll_up.png")),
-            ("legacy/widget/scroll_down", include_bytes!("../assets/legacy/widget/scroll_down.png")),
-            ("shulkds/logo_dualscreen", include_bytes!("../assets/shulkds/logo_dualscreen.png")),
+            (
+                "legacy/tiles/panel",
+                include_bytes!("../assets/legacy/tiles/panel.png"),
+            ),
+            (
+                "legacy/tiles/panel_recess",
+                include_bytes!("../assets/legacy/tiles/panel_recess.png"),
+            ),
+            (
+                "legacy/tiles/entity_panel",
+                include_bytes!("../assets/legacy/tiles/entity_panel.png"),
+            ),
+            (
+                "legacy/tiles/high_tab_left",
+                include_bytes!("../assets/legacy/tiles/high_tab_left.png"),
+            ),
+            (
+                "legacy/tiles/high_tab_middle",
+                include_bytes!("../assets/legacy/tiles/high_tab_middle.png"),
+            ),
+            (
+                "legacy/tiles/high_tab_right",
+                include_bytes!("../assets/legacy/tiles/high_tab_right.png"),
+            ),
+            (
+                "legacy/tiles/low_tab",
+                include_bytes!("../assets/legacy/tiles/low_tab.png"),
+            ),
+            (
+                "legacy/container/button_slot",
+                include_bytes!("../assets/legacy/container/button_slot.png"),
+            ),
+            (
+                "legacy/container/button_slot_highlighted",
+                include_bytes!("../assets/legacy/container/button_slot_highlighted.png"),
+            ),
+            (
+                "legacy/container/button_slot_selected",
+                include_bytes!("../assets/legacy/container/button_slot_selected.png"),
+            ),
+            (
+                "legacy/container/crafting_selection",
+                include_bytes!("../assets/legacy/container/crafting_selection.png"),
+            ),
+            (
+                "legacy/container/arrow",
+                include_bytes!("../assets/legacy/container/arrow.png"),
+            ),
+            (
+                "legacy/container/full_arrow",
+                include_bytes!("../assets/legacy/container/full_arrow.png"),
+            ),
+            (
+                "legacy/container/head_slot",
+                include_bytes!("../assets/legacy/container/head_slot.png"),
+            ),
+            (
+                "legacy/container/armor_slot",
+                include_bytes!("../assets/legacy/container/armor_slot.png"),
+            ),
+            (
+                "legacy/container/brewing_slots",
+                include_bytes!("../assets/legacy/container/brewing_slots.png"),
+            ),
+            (
+                "legacy/container/anvil_hammer",
+                include_bytes!("../assets/legacy/container/anvil_hammer.png"),
+            ),
+            (
+                "legacy/hud/hotbar_selection",
+                include_bytes!("../assets/legacy/hud/hotbar_selection.png"),
+            ),
+            (
+                "legacy/container/lit",
+                include_bytes!("../assets/legacy/container/lit.png"),
+            ),
+            (
+                "legacy/container/lit_progress",
+                include_bytes!("../assets/legacy/container/lit_progress.png"),
+            ),
+            (
+                "legacy/container/combiner_plus",
+                include_bytes!("../assets/legacy/container/combiner_plus.png"),
+            ),
+            (
+                "legacy/container/error_cross",
+                include_bytes!("../assets/legacy/container/error_cross.png"),
+            ),
+            (
+                "legacy/container/smithing_hammer",
+                include_bytes!("../assets/legacy/container/smithing_hammer.png"),
+            ),
+            (
+                "legacy/container/brewing_coil_flame",
+                include_bytes!("../assets/legacy/container/brewing_coil_flame.png"),
+            ),
+            (
+                "legacy/container/brewing_fuel_slot",
+                include_bytes!("../assets/legacy/container/brewing_fuel_slot.png"),
+            ),
+            (
+                "legacy/container/enchanting_slot",
+                include_bytes!("../assets/legacy/container/enchanting_slot.png"),
+            ),
+            (
+                "legacy/container/enchantment_button_active",
+                include_bytes!("../assets/legacy/container/enchantment_button_active.png"),
+            ),
+            (
+                "legacy/container/enchantment_button_empty",
+                include_bytes!("../assets/legacy/container/enchantment_button_empty.png"),
+            ),
+            (
+                "legacy/container/enchantment_button_selected",
+                include_bytes!("../assets/legacy/container/enchantment_button_selected.png"),
+            ),
+            (
+                "legacy/container/cartography_table_copy",
+                include_bytes!("../assets/legacy/container/cartography_table_copy.png"),
+            ),
+            (
+                "legacy/container/cartography_table_empty",
+                include_bytes!("../assets/legacy/container/cartography_table_empty.png"),
+            ),
+            (
+                "legacy/container/cartography_table_glass",
+                include_bytes!("../assets/legacy/container/cartography_table_glass.png"),
+            ),
+            (
+                "legacy/container/cartography_table_map",
+                include_bytes!("../assets/legacy/container/cartography_table_map.png"),
+            ),
+            (
+                "legacy/container/cartography_table_zoom",
+                include_bytes!("../assets/legacy/container/cartography_table_zoom.png"),
+            ),
+            (
+                "legacy/container/beacon_1",
+                include_bytes!("../assets/legacy/container/beacon_1.png"),
+            ),
+            (
+                "legacy/container/beacon_2",
+                include_bytes!("../assets/legacy/container/beacon_2.png"),
+            ),
+            (
+                "legacy/container/beacon_3",
+                include_bytes!("../assets/legacy/container/beacon_3.png"),
+            ),
+            (
+                "legacy/container/beacon_4",
+                include_bytes!("../assets/legacy/container/beacon_4.png"),
+            ),
+            (
+                "legacy/container/beacon_check",
+                include_bytes!("../assets/legacy/container/beacon_check.png"),
+            ),
+            (
+                "legacy/container/crafter_slot",
+                include_bytes!("../assets/legacy/container/crafter_slot.png"),
+            ),
+            (
+                "legacy/container/disabled_crafter_slot",
+                include_bytes!("../assets/legacy/container/disabled_crafter_slot.png"),
+            ),
+            (
+                "legacy/container/non_interactive_result_slot",
+                include_bytes!("../assets/legacy/container/non_interactive_result_slot.png"),
+            ),
+            (
+                "legacy/container/chest_slot",
+                include_bytes!("../assets/legacy/container/chest_slot.png"),
+            ),
+            (
+                "legacy/container/legs_slot",
+                include_bytes!("../assets/legacy/container/legs_slot.png"),
+            ),
+            (
+                "legacy/container/feet_slot",
+                include_bytes!("../assets/legacy/container/feet_slot.png"),
+            ),
+            (
+                "legacy/container/shield_slot",
+                include_bytes!("../assets/legacy/container/shield_slot.png"),
+            ),
+            (
+                "legacy/container/saddle_slot",
+                include_bytes!("../assets/legacy/container/saddle_slot.png"),
+            ),
+            (
+                "legacy/container/llama_armor_slot",
+                include_bytes!("../assets/legacy/container/llama_armor_slot.png"),
+            ),
+            (
+                "legacy/container/slot_highlight",
+                include_bytes!("../assets/legacy/container/slot_highlight.png"),
+            ),
+            (
+                "legacy/tiles/small_panel",
+                include_bytes!("../assets/legacy/tiles/small_panel.png"),
+            ),
+            (
+                "legacy/tiles/creative_panel",
+                include_bytes!("../assets/legacy/tiles/creative_panel.png"),
+            ),
+            (
+                "legacy/tiles/square_recessed_panel",
+                include_bytes!("../assets/legacy/tiles/square_recessed_panel.png"),
+            ),
+            (
+                "legacy/tiles/square_entity_panel",
+                include_bytes!("../assets/legacy/tiles/square_entity_panel.png"),
+            ),
+            (
+                "legacy/container/icon_holder",
+                include_bytes!("../assets/legacy/container/icon_holder.png"),
+            ),
+            (
+                "legacy/container/sizeable_icon_holder",
+                include_bytes!("../assets/legacy/container/sizeable_icon_holder.png"),
+            ),
+            (
+                "legacy/container/red_icon_holder",
+                include_bytes!("../assets/legacy/container/red_icon_holder.png"),
+            ),
+            (
+                "legacy/container/gray_icon_holder",
+                include_bytes!("../assets/legacy/container/gray_icon_holder.png"),
+            ),
+            (
+                "legacy/container/icon_warning",
+                include_bytes!("../assets/legacy/container/icon_warning.png"),
+            ),
+            (
+                "legacy/container/crafting_2_slots_selection",
+                include_bytes!("../assets/legacy/container/crafting_2_slots_selection.png"),
+            ),
+            (
+                "legacy/container/select_icon_highlight",
+                include_bytes!("../assets/legacy/container/select_icon_highlight.png"),
+            ),
+            (
+                "legacy/container/small_arrow",
+                include_bytes!("../assets/legacy/container/small_arrow.png"),
+            ),
+            (
+                "legacy/container/full_small_arrow",
+                include_bytes!("../assets/legacy/container/full_small_arrow.png"),
+            ),
+            (
+                "legacy/container/padlock",
+                include_bytes!("../assets/legacy/container/padlock.png"),
+            ),
+            (
+                "legacy/container/experience_bar_result",
+                include_bytes!("../assets/legacy/container/experience_bar_result.png"),
+            ),
+            (
+                "legacy/icon/structures",
+                include_bytes!("../assets/legacy/icon/structures.png"),
+            ),
+            (
+                "legacy/icon/decoration",
+                include_bytes!("../assets/legacy/icon/decoration.png"),
+            ),
+            (
+                "legacy/icon/redstone_and_transport",
+                include_bytes!("../assets/legacy/icon/redstone_and_transport.png"),
+            ),
+            (
+                "legacy/icon/materials",
+                include_bytes!("../assets/legacy/icon/materials.png"),
+            ),
+            (
+                "legacy/icon/food",
+                include_bytes!("../assets/legacy/icon/food.png"),
+            ),
+            (
+                "legacy/icon/tools",
+                include_bytes!("../assets/legacy/icon/tools.png"),
+            ),
+            (
+                "legacy/icon/armour",
+                include_bytes!("../assets/legacy/icon/armour.png"),
+            ),
+            (
+                "legacy/icon/mechanisms",
+                include_bytes!("../assets/legacy/icon/mechanisms.png"),
+            ),
+            (
+                "legacy/icon/transport",
+                include_bytes!("../assets/legacy/icon/transport.png"),
+            ),
+            (
+                "legacy/icon/brewing",
+                include_bytes!("../assets/legacy/icon/brewing.png"),
+            ),
+            (
+                "legacy/icon/misc",
+                include_bytes!("../assets/legacy/icon/misc.png"),
+            ),
+            (
+                "legacy/icon/search",
+                include_bytes!("../assets/legacy/icon/search.png"),
+            ),
+            (
+                "legacy/widget/scroll_left",
+                include_bytes!("../assets/legacy/widget/scroll_left.png"),
+            ),
+            (
+                "legacy/widget/scroll_right",
+                include_bytes!("../assets/legacy/widget/scroll_right.png"),
+            ),
+            (
+                "legacy/widget/scroll_up",
+                include_bytes!("../assets/legacy/widget/scroll_up.png"),
+            ),
+            (
+                "legacy/widget/scroll_down",
+                include_bytes!("../assets/legacy/widget/scroll_down.png"),
+            ),
+            (
+                "shulkds/logo_dualscreen",
+                include_bytes!("../assets/shulkds/logo_dualscreen.png"),
+            ),
+            (
+                "shulkds/virtual_mouse",
+                include_bytes!("../assets/shulkds/virtual_mouse.png"),
+            ),
         ];
         for &(name, bytes) in legacy_sprites {
             if let Ok((w, h, rgba)) = decode_bytes(bytes) {
@@ -2242,6 +2489,22 @@ impl HudBatch {
             blur_at: 0,
             inline_profiles: Vec::new(),
         }
+    }
+    /// HUD batch for a dedicated ShulkDS bottom touchscreen display using
+    /// [`crate::dual_screen::shulkds_bottom_hud_scale`].
+    pub fn new_shulkds_bottom(window: [u32; 2], touch_scale: f32) -> Self {
+        let limit = GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed);
+        let raw = crate::dual_screen::shulkds_bottom_hud_scale(window, touch_scale);
+        let scale = if limit > 0 {
+            raw.min(limit as f32).max(1.0)
+        } else {
+            raw
+        };
+        let mut batch = Self::new(window);
+        batch.scale = scale;
+        batch.width = (window[0] as f32 / scale).ceil();
+        batch.height = (window[1] as f32 / scale).ceil();
+        batch
     }
     /// Draw the vertices added since `start` with the inverting blend.
     pub fn invert_since(&mut self, start: usize) {

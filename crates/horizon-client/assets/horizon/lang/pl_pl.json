@@ -354,5 +354,18 @@
   "horizon.pages.open.split_setup": "Podzielony ekran…",
   "horizon.pages.split_settings": "Ustawienia podzielonego ekranu",
   "horizon.pages.split_setup": "Podzielony ekran",
-  "horizon.pages.split_setup.tooltip": "Gracze na tym komputerze: kontrolery mogą dołączyć do twojego świata."
+  "horizon.pages.split_setup.tooltip": "Gracze na tym komputerze: kontrolery mogą dołączyć do twojego świata.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Pozycja paska",
+  "horizon.extras.shulkds_hotbar.tooltip": "Wybierz, gdzie wyświetlać pasek szybkiego wyboru: na dole dolnego ekranu, na górze dolnego ekranu lub klasycznie na górnym ekranie.",
+  "horizon.extras.shulkds_classic_crafting": "Klasyczny crafting",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Używaj klasycznej siatki 2x2 i 3x3 z księgą receptur zamiast menu konsolowego.",
+  "horizon.extras.shulkds_classic_inventory": "Klasyczny ekwipunek",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Otwieraj klasyczny ekwipunek przetrwania i kreatywny na górnym ekranie po naciśnięciu Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Auto-aktualizacje",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Sprawdzaj wydania na GitHub przy starcie ShulkDS i proponuj instalację nowych wersji.",
+  "horizon.shulkds.hotbar.bottom": "Dolny ekran (Dół)",
+  "horizon.shulkds.hotbar.top": "Dolny ekran (Góra)",
+  "horizon.shulkds.hotbar.classic": "Górny ekran (Klasyczny)",
+  "horizon.shulkds.check_updates": "Sprawdź aktualizacje"
 }

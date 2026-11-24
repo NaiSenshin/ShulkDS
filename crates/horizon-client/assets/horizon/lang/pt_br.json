@@ -140,5 +140,18 @@
   "starling.account.setup.ely_title": "Entrar no Ely.by",
   "starling.account.setup.offline_title": "Jogar offline",
   "starling.account.setup.import": "Arquivos de um computador",
-  "starling.account.setup.preparing": "Login feito. Preparando os arquivos do jogo…"
+  "starling.account.setup.preparing": "Login feito. Preparando os arquivos do jogo…",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Posição da Hotbar",
+  "horizon.extras.shulkds_hotbar.tooltip": "Escolha onde a hotbar aparece: embaixo na tela inferior, no topo da tela inferior ou clássica na tela superior.",
+  "horizon.extras.shulkds_classic_crafting": "Criação Clássica",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Usa a grade manual Java 2x2 e 3x3 com o livro de receitas em vez do menu de console.",
+  "horizon.extras.shulkds_classic_inventory": "Inventário Clássico",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Abre os inventários clássicos de Sobrevivência e Criativo na tela superior ao pressionar Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Atualizações Auto",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Verifica lançamentos no GitHub ao iniciar o ShulkDS e oferece novas atualizações.",
+  "horizon.shulkds.hotbar.bottom": "Tela inf. (Baixo)",
+  "horizon.shulkds.hotbar.top": "Tela inf. (Topo)",
+  "horizon.shulkds.hotbar.classic": "Tela sup. (Clássica)",
+  "horizon.shulkds.check_updates": "Verificar atualizações"
 }

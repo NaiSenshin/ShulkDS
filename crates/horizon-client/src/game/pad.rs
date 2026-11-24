@@ -361,11 +361,23 @@ impl Game<'_> {
                 if button == Button::North {
                     if !self.open_ridden_mount_menu() {
                         if self.creative {
+                            self.reset_inventory_clicks();
+                            self.recipe_ui.reset_screen();
                             self.screen = Screen::Creative;
                             self.refresh_creative_tabs();
                             self.creative_screen.reopen();
                             self.refresh_saved_hotbars();
                             self.capture(false);
+                            self.release_use_for_keybind_screen();
+                        } else if self.use_classic_inventory() {
+                            self.reset_inventory_clicks();
+                            self.recipe_ui.reset_screen();
+                            self.craft_size = 2;
+                            self.craft_table = None;
+                            self.legacy_crafting.pocket_crafting = false;
+                            self.screen = Screen::Inventory;
+                            self.capture(false);
+                            self.release_use_for_keybind_screen();
                         } else if self.shulkds.dashboard.active_tab
                             != horizon_client::dual_screen::DashboardTab::Inventory
                         {
@@ -376,17 +388,23 @@ impl Game<'_> {
                         }
                     }
                 } else if self.creative {
+                    self.reset_inventory_clicks();
+                    self.recipe_ui.reset_screen();
                     self.screen = Screen::Creative;
                     self.refresh_creative_tabs();
                     self.creative_screen.reopen();
                     self.refresh_saved_hotbars();
                     self.capture(false);
+                    self.release_use_for_keybind_screen();
                 } else {
+                    self.reset_inventory_clicks();
+                    self.recipe_ui.reset_screen();
                     self.craft_size = 2;
                     self.craft_table = None;
-                    self.legacy_crafting.pocket_crafting = true;
+                    self.legacy_crafting.pocket_crafting = !self.use_classic_crafting();
                     self.screen = Screen::Inventory;
                     self.capture(false);
+                    self.release_use_for_keybind_screen();
                 }
             }
             return Ok(());

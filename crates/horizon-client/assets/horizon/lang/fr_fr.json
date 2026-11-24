@@ -404,5 +404,18 @@
   "horizon.extras.cosmetics_mine": "Mes cosmétiques",
   "horizon.extras.cosmetics_mine.tooltip": "Affiche les cosmétiques que vous portez sur votre joueur, à la troisième personne et dans l'inventaire.",
   "horizon.extras.cosmetics_others": "Cosmétiques des autres",
-  "horizon.extras.cosmetics_others.tooltip": "Affiche les cosmétiques que portent les autres joueurs Horizon. Désactivé, le jeu ne demande jamais ce qu'ils portent."
+  "horizon.extras.cosmetics_others.tooltip": "Affiche les cosmétiques que portent les autres joueurs Horizon. Désactivé, le jeu ne demande jamais ce qu'ils portent.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Position barre d'accès",
+  "horizon.extras.shulkds_hotbar.tooltip": "Choisit où s'affiche la barre rapide : en bas de l'écran inférieur, en haut de l'écran inférieur ou classique sous la barre d'XP en haut.",
+  "horizon.extras.shulkds_classic_crafting": "Fabrication classique",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Utilise la grille manuelle Java 2x2 et 3x3 avec le livre de recettes au lieu du menu console.",
+  "horizon.extras.shulkds_classic_inventory": "Inventaire classique",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Ouvre les menus classiques Survie et Créatif sur l'écran supérieur avec Y/E au lieu de l'inventaire tactile inférieur.",
+  "horizon.extras.shulkds_auto_updates": "Mises à jour auto",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Vérifie les versions GitHub au démarrage de ShulkDS et propose de télécharger et installer les mises à jour.",
+  "horizon.shulkds.hotbar.bottom": "Écran bas (Bas)",
+  "horizon.shulkds.hotbar.top": "Écran bas (Haut)",
+  "horizon.shulkds.hotbar.classic": "Écran haut (Classique)",
+  "horizon.shulkds.check_updates": "Vérifier les mises à jour"
 }

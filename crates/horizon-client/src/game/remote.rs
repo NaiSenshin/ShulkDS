@@ -9725,14 +9725,9 @@ impl Game<'_> {
     }
     /// A container click: the server answers with the authoritative slots.
     pub(super) fn remote_click(&mut self, right: bool) {
-        let Some(size) = self
-            .renderer
-            .as_ref()
-            .map(|r| [r.config.width, r.config.height])
-        else {
+        let Some(batch) = self.gui_scale() else {
             return;
         };
-        let batch = HudBatch::new(size);
         let Some(internal) = self.slot_at(&batch, self.cursor.0, self.cursor.1) else {
             return;
         };
@@ -9963,6 +9958,7 @@ impl Game<'_> {
         // container's keyboard focus must not outlive it (a Tab bound to the
         // inventory moves the focus and closes the container in one press).
         self.pad_clear_focus();
+        self.reset_inventory_clicks();
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
             r.menu = None;
@@ -9979,6 +9975,8 @@ impl Game<'_> {
         self.carried = None;
         self.craft_size = 2;
         self.craft_table = None;
+        self.legacy_crafting.pocket_crafting = false;
+        self.legacy_crafting.clear_active_session();
         self.shulkds.dashboard.container_open = false;
         self.shulkds.dashboard.container_pos = None;
         if let Some(key) = self.container.take() {

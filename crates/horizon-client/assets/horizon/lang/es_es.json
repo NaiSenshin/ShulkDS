@@ -224,5 +224,18 @@
   "How frames reach the screen, and the performance overlay.": "Cómo llegan los fotogramas a la pantalla, y la superposición de rendimiento.",
   "Brighter-than-white output on an HDR display.": "Salida más brillante que el blanco en una pantalla HDR.",
   "Results for \"%s\"": "Resultados de \"%s\"",
-  "No settings match.": "Ningún ajuste coincide."
+  "No settings match.": "Ningún ajuste coincide.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Posición de barra",
+  "horizon.extras.shulkds_hotbar.tooltip": "Elige dónde mostrar la barra rápida: abajo en la pantalla inferior, arriba en la pantalla inferior o clásica bajo la barra de XP arriba.",
+  "horizon.extras.shulkds_classic_crafting": "Fabricación clásica",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Usa la cuadrícula manual Java 2x2 y 3x3 con el libro de recetas en lugar del menú por pestañas de consola.",
+  "horizon.extras.shulkds_classic_inventory": "Inventario clásico",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Abre los inventarios clásicos de Supervivencia y Creativo en la pantalla superior al pulsar Y/E.",
+  "horizon.extras.shulkds_auto_updates": "Actualizaciones auto",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Comprueba GitHub Releases al iniciar ShulkDS y avisa cuando hay una nueva actualización.",
+  "horizon.shulkds.hotbar.bottom": "Pantalla inf. (Abajo)",
+  "horizon.shulkds.hotbar.top": "Pantalla inf. (Arriba)",
+  "horizon.shulkds.hotbar.classic": "Pantalla sup. (Clásica)",
+  "horizon.shulkds.check_updates": "Buscar actualizaciones"
 }

@@ -336,5 +336,18 @@
   "horizon.extras.cosmetics_mine": "Meine Kosmetik",
   "horizon.extras.cosmetics_mine.tooltip": "Zeigt die Kosmetik, die du trägst, an deinem eigenen Spieler, in der dritten Person und im Inventar.",
   "horizon.extras.cosmetics_others": "Kosmetik anderer Spieler",
-  "horizon.extras.cosmetics_others.tooltip": "Zeigt die Kosmetik anderer Horizon-Spieler. Aus fragt das Spiel nie, was sie tragen."
+  "horizon.extras.cosmetics_others.tooltip": "Zeigt die Kosmetik anderer Horizon-Spieler. Aus fragt das Spiel nie, was sie tragen.",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "Hotbar-Position",
+  "horizon.extras.shulkds_hotbar.tooltip": "Wähle, wo die Schnellzugriffsleiste erscheint: unten auf dem unteren Bildschirm, oben auf dem unteren Bildschirm oder klassisch unter der XP-Leiste oben.",
+  "horizon.extras.shulkds_classic_crafting": "Klassisches Crafting",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "Nutzt das klassische Java-Handwerksraster (2x2 und 3x3) mit Rezeptbuch statt des Konsolen-Crafting-Menüs.",
+  "horizon.extras.shulkds_classic_inventory": "Klassisches Inventar",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "Öffnet beim Drücken von Y/E das klassische Überlebens- und Kreativinventar auf dem oberen Bildschirm statt des unteren Touch-Inventars.",
+  "horizon.extras.shulkds_auto_updates": "Automatische Updates",
+  "horizon.extras.shulkds_auto_updates.tooltip": "Prüft beim Start von ShulkDS auf GitHub-Releases und bietet neue Updates zum Herunterladen an.",
+  "horizon.shulkds.hotbar.bottom": "Unten (Unten)",
+  "horizon.shulkds.hotbar.top": "Unten (Oben)",
+  "horizon.shulkds.hotbar.classic": "Oben (Klassisch)",
+  "horizon.shulkds.check_updates": "Nach Updates suchen"
 }

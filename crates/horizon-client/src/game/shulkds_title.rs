@@ -37,6 +37,16 @@ const ACCENT_SILVER: u32 = u32::from_le_bytes([154, 168, 192, 255]);
 const ACCENT_RED: u32 = u32::from_le_bytes([224, 86, 86, 255]);
 const ACCENT_VIOLET: u32 = u32::from_le_bytes([178, 124, 240, 255]);
 
+pub(super) struct ShulkdsUpdateView {
+    pub version: String,
+    pub size_mb: String,
+    pub highlights: Vec<String>,
+    pub stage_title: String,
+    pub body: String,
+    pub progress: Option<f32>,
+    pub buttons: Vec<&'static str>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HitAct {
     MainSingleplayer,
@@ -68,6 +78,7 @@ enum HitAct {
     OptionsPage(Page),
     OptionsDone,
     ModalBack,
+    UpdateAction(u8),
 }
 
 #[derive(Clone)]
@@ -450,6 +461,82 @@ impl Game<'_> {
         );
         self.draw_title_top_vignette(batch, w, h, show_top_bar);
 
+        if let Some(upd) = self.shulkds_update_modal_view() {
+            batch.fill(&self.gui.atlas, 0.0, 0.0, w, h, rgba(8, 10, 14, 175));
+            let card_w = (w - 40.0).clamp(180.0, 340.0);
+            let card_h = (h - 32.0).clamp(112.0, 176.0);
+            let cx = ((w - card_w) * 0.5).floor();
+            let cy = ((h - card_h) * 0.5).floor();
+            self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
+            batch.fill(&self.gui.atlas, cx + 2.0, cy + 2.0, card_w - 4.0, 2.0, ACCENT_GREEN);
+
+            let hdr = if upd.version.is_empty() {
+                upd.stage_title.clone()
+            } else {
+                format!("ShulkDS v{} Available", upd.version)
+            };
+            let (hdr_fit, hs) = self.fit_text_width(&hdr, card_w - 24.0, 1.10);
+            let hw = HudBatch::text_width(&self.gui.atlas, &hdr_fit) * hs;
+            batch.text_scaled(
+                &self.gui.atlas,
+                &hdr_fit,
+                cx + (card_w - hw) * 0.5,
+                cy + 10.0,
+                hs,
+                ACCENT_GREEN,
+                true,
+            );
+
+            let mut ly = cy + 25.0;
+            if !upd.size_mb.is_empty() {
+                let sz = format!("Download size: {} MB", upd.size_mb);
+                let sw = HudBatch::text_width(&self.gui.atlas, &sz) * 0.80;
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &sz,
+                    cx + (card_w - sw) * 0.5,
+                    ly,
+                    0.80,
+                    TEXT_MUTED,
+                    true,
+                );
+                ly += 13.0;
+            }
+
+            let inner_w = card_w - 24.0;
+            if !upd.highlights.is_empty() {
+                batch.text_scaled(&self.gui.atlas, "Highlights:", cx + 12.0, ly, 0.85, ACCENT_AMBER, true);
+                ly += 11.0;
+                let max_y = cy + card_h - 14.0;
+                for item in &upd.highlights {
+                    let bullet = format!("- {item}");
+                    let txt = horizon_client::text::Text::literal(bullet);
+                    let wrapped = self.gui.atlas.font.split(&txt, inner_w / 0.80);
+                    for line in wrapped.into_iter().take(2) {
+                        if ly + 9.0 > max_y {
+                            break;
+                        }
+                        let s = line.plain();
+                        batch.text_scaled(&self.gui.atlas, &s, cx + 12.0, ly, 0.80, TEXT_WHITE, true);
+                        ly += 10.0;
+                    }
+                    ly += 2.0;
+                    if ly + 9.0 > max_y {
+                        break;
+                    }
+                }
+            } else {
+                let txt = horizon_client::text::Text::literal(upd.body.clone());
+                let wrapped = self.gui.atlas.font.split(&txt, inner_w / 0.85);
+                for line in wrapped.into_iter().take(6) {
+                    let s = line.plain();
+                    batch.text_scaled(&self.gui.atlas, &s, cx + 12.0, ly, 0.85, TEXT_WHITE, true);
+                    ly += 11.0;
+                }
+            }
+            return;
+        }
+
         match kind {
             Some(BottomTitleKind::Main) => {
                 let hide_splash = self.settings.file.bool("hideSplashTexts");
@@ -757,14 +844,19 @@ impl Game<'_> {
         let Some(kind) = self.current_title_kind() else {
             return;
         };
-        let tag = match kind {
-            BottomTitleKind::Main => 0,
-            BottomTitleKind::Select => 1,
-            BottomTitleKind::Create => 2,
-            BottomTitleKind::MultiplayerList => 3,
-            BottomTitleKind::MultiplayerWarning => 4,
-            BottomTitleKind::Options => 5,
-            BottomTitleKind::DetailModal => 6,
+        let update_modal = self.shulkds_update_modal_view();
+        let tag = if update_modal.is_some() {
+            7
+        } else {
+            match kind {
+                BottomTitleKind::Main => 0,
+                BottomTitleKind::Select => 1,
+                BottomTitleKind::Create => 2,
+                BottomTitleKind::MultiplayerList => 3,
+                BottomTitleKind::MultiplayerWarning => 4,
+                BottomTitleKind::Options => 5,
+                BottomTitleKind::DetailModal => 6,
+            }
         };
         self.sync_title_mode_tag(tag);
         self.shulkds_title.hits.clear();
@@ -802,6 +894,11 @@ impl Game<'_> {
             );
         } else {
             batch.fill(&self.gui.atlas, bx, by, bw, bh, rgba(34, 24, 18, 255));
+        }
+
+        if let Some(upd) = update_modal {
+            self.draw_bottom_title_update(batch, bx, by, bw, bh, &upd);
+            return;
         }
 
         match kind {
@@ -1161,13 +1258,15 @@ impl Game<'_> {
         let dock_y = by + bh - dock_h - 8.0;
         let body_y = hdr_y + hdr_h + 7.0;
         let body_h = (dock_y - 7.0 - body_y).max(60.0);
-        let row_h = ((body_h - 12.0) / 3.6).floor().clamp(16.0, 22.0);
+        let row_h = ((body_h - 26.0) / 4.0).floor().clamp(16.0, 26.0);
 
         match options.tab {
             0 => {
+                let content_h = 4.0 * row_h + 26.0;
+                let y0 = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
                 // World Name field (tap focuses & triggers Android keyboard)
-                batch.text_scaled(&self.gui.atlas, "World Name", ix, body_y, 0.80, TEXT_MUTED, true);
-                let name_y = body_y + 10.0;
+                batch.text_scaled(&self.gui.atlas, "World Name", ix, y0, 0.80, TEXT_MUTED, true);
+                let name_y = y0 + 10.0;
                 let name_rect = [ix, name_y, iw, row_h];
                 self.shulkds_title.hits.push(HitItem {
                     rect: [name_rect[0] - bx, name_rect[1] - by, name_rect[2], name_rect[3]],
@@ -1217,7 +1316,8 @@ impl Game<'_> {
             }
             1 => {
                 // World Type + Customize
-                let wt_y = body_y + 2.0;
+                let content_h = 3.0 * row_h + 24.0;
+                let wt_y = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
                 let preset_lbl = format!("World Type: {}", Self::world_preset_label(options.world_type));
                 let has_cust = matches!(options.world_type, WorldPreset::Flat | WorldPreset::SingleBiomeSurface);
                 if has_cust {
@@ -1258,10 +1358,12 @@ impl Game<'_> {
             }
             _ => {
                 // More tab: Game Rules, Data Packs, Experiments
-                let btn_h = ((body_h - 12.0) / 3.0).floor().clamp(18.0, 24.0);
-                self.draw_title_pill_btn(batch, bx, by, [ix, body_y + 2.0, iw, btn_h], "Game Rules...", Some(ACCENT_BLUE), true, false, HitAct::CreateButton(29));
-                self.draw_title_pill_btn(batch, bx, by, [ix, body_y + 6.0 + btn_h, iw, btn_h], "Data Packs...", Some(ACCENT_GREEN), true, false, HitAct::CreateButton(31));
-                self.draw_title_pill_btn(batch, bx, by, [ix, body_y + 10.0 + btn_h * 2.0, iw, btn_h], "Experiments...", Some(ACCENT_AMBER), true, false, HitAct::CreateButton(30));
+                let btn_h = ((body_h - 12.0) / 3.0).floor().clamp(18.0, 26.0);
+                let content_h = btn_h * 3.0 + 8.0;
+                let y0 = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
+                self.draw_title_pill_btn(batch, bx, by, [ix, y0, iw, btn_h], "Game Rules...", Some(ACCENT_BLUE), true, false, HitAct::CreateButton(29));
+                self.draw_title_pill_btn(batch, bx, by, [ix, y0 + 4.0 + btn_h, iw, btn_h], "Data Packs...", Some(ACCENT_GREEN), true, false, HitAct::CreateButton(31));
+                self.draw_title_pill_btn(batch, bx, by, [ix, y0 + 8.0 + btn_h * 2.0, iw, btn_h], "Experiments...", Some(ACCENT_AMBER), true, false, HitAct::CreateButton(30));
             }
         }
 
@@ -1412,12 +1514,14 @@ impl Game<'_> {
         let cur = self.ui.options.page();
         let dock_h = 18.0;
         let dock_y = by + bh - dock_h - 8.0;
-        let grid_y = by + 28.0;
-        let grid_h = (dock_y - 8.0 - grid_y).max(60.0);
+        let grid_y0 = by + 26.0;
+        let avail_h = (dock_y - 7.0 - grid_y0).max(76.0);
         let gap = 5.0;
         let col_w = ((iw - gap) * 0.5).floor();
         let col2_w = iw - col_w - gap;
-        let row_h = ((grid_h - gap * 2.0) / 3.0).floor().clamp(18.0, 26.0);
+        let row_h = ((avail_h - gap * 3.0) / 4.0).floor().clamp(16.0, 34.0);
+        let grid_total_h = row_h * 4.0 + gap * 3.0;
+        let grid_y = grid_y0 + ((avail_h - grid_total_h) * 0.5).floor().max(0.0);
 
         let pages = [
             ("Video Settings", Page::Video, ACCENT_BLUE),
@@ -1426,6 +1530,8 @@ impl Game<'_> {
             ("Language", Page::Language, ACCENT_SILVER),
             ("Resource Packs", Page::Packs, ACCENT_AMBER),
             ("Mods", Page::Mods, ACCENT_VIOLET),
+            ("Horizon / ShulkDS", Page::Horizon, ACCENT_GREEN),
+            ("Extras", Page::Extras, ACCENT_BLUE),
         ];
         for (i, &(lbl, page, accent)) in pages.iter().enumerate() {
             let r = i / 2;
@@ -1749,8 +1855,130 @@ impl Game<'_> {
                     title.escape();
                 }
             }
+            HitAct::UpdateAction(idx) => {
+                self.shulkds_update_act(idx as usize);
+            }
         }
     }
+
+    fn draw_bottom_title_update(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+        upd: &ShulkdsUpdateView,
+    ) {
+        let card_w = (bw - 24.0).clamp(160.0, 290.0);
+        let pad = 12.0;
+        let inner_w = card_w - pad * 2.0;
+        let msg_text = horizon_client::text::Text::literal(upd.body.clone());
+        let body_lines: Vec<String> = self
+            .gui
+            .atlas
+            .font
+            .split(&msg_text, inner_w / 0.82)
+            .into_iter()
+            .take(5)
+            .map(|l| l.plain())
+            .collect();
+        let bar_h = if upd.progress.is_some() { 14.0 } else { 0.0 };
+        let btn_h = 22.0;
+        let card_h = (pad + 16.0 + body_lines.len() as f32 * 10.0 + 10.0 + bar_h + btn_h + pad)
+            .clamp(96.0, bh - 16.0);
+        let cx = bx + ((bw - card_w) * 0.5).floor();
+        let cy = by + ((bh - card_h) * 0.5).floor();
+        self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
+        batch.fill(&self.gui.atlas, cx + 2.0, cy + 2.0, card_w - 4.0, 2.0, ACCENT_GREEN);
+
+        let (t_fit, ts) = self.fit_text_width(&upd.stage_title, inner_w, 1.0);
+        let tw = HudBatch::text_width(&self.gui.atlas, &t_fit) * ts;
+        batch.text_scaled(
+            &self.gui.atlas,
+            &t_fit,
+            cx + (card_w - tw) * 0.5,
+            cy + 9.0,
+            ts,
+            TEXT_WHITE,
+            true,
+        );
+
+        let mut ly = cy + 24.0;
+        for line in &body_lines {
+            batch.text_scaled(&self.gui.atlas, line, cx + pad, ly, 0.82, TEXT_MUTED, true);
+            ly += 10.0;
+        }
+        if let Some(frac) = upd.progress {
+            let py = ly + 4.0;
+            batch.fill(&self.gui.atlas, cx + pad, py, inner_w, 6.0, rgba(20, 22, 26, 255));
+            if frac > 0.0 {
+                batch.fill(
+                    &self.gui.atlas,
+                    cx + pad,
+                    py,
+                    (inner_w * frac).max(6.0),
+                    6.0,
+                    ACCENT_GREEN,
+                );
+            }
+        }
+
+        let btn_y = cy + card_h - pad - btn_h;
+        let n = upd.buttons.len().max(1);
+        let gap = 6.0;
+        let each_w = ((inner_w - gap * (n as f32 - 1.0)) / n as f32).floor();
+        for (i, label) in upd.buttons.iter().enumerate() {
+            let x = cx + pad + i as f32 * (each_w + gap);
+            let w = if i + 1 == n {
+                cx + pad + inner_w - x
+            } else {
+                each_w
+            };
+            let accent = if i == 0 && n > 1 {
+                Some(ACCENT_GREEN)
+            } else if i == 1 && n == 3 {
+                Some(ACCENT_AMBER)
+            } else {
+                Some(ACCENT_RED)
+            };
+            self.draw_title_pill_btn(
+                batch,
+                bx,
+                by,
+                [x, btn_y, w, btn_h],
+                label,
+                accent,
+                true,
+                false,
+                HitAct::UpdateAction(i as u8),
+            );
+        }
+    }
+
+    pub(super) fn trigger_check_updates(&mut self) {
+        #[cfg(target_os = "android")]
+        self.check_updates_now();
+        #[cfg(not(target_os = "android"))]
+        {
+            self.shulkds
+                .dashboard
+                .set_status("Updates require an Android build");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub(super) fn shulkds_update_modal_view(&self) -> Option<ShulkdsUpdateView> {
+        None
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub(super) fn shulkds_update_sig(&self) -> u64 {
+        0
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub(super) fn shulkds_update_act(&mut self, _button: usize) {}
 
     pub(super) fn shulkds_title_pad_button(
         &mut self,
@@ -1772,6 +2000,11 @@ impl Game<'_> {
         }
         match button {
             Button::East => {
+                if let Some(upd) = self.shulkds_update_modal_view() {
+                    let cancel_idx = upd.buttons.len().saturating_sub(1);
+                    self.shulkds_update_act(cancel_idx);
+                    return Ok(true);
+                }
                 match kind {
                     BottomTitleKind::Main => {}
                     BottomTitleKind::Create => self.execute_shulkds_title_hit(HitAct::CreateButton(22)),

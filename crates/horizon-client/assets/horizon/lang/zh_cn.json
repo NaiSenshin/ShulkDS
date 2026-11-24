@@ -354,5 +354,18 @@
   "horizon.agent.off": "关闭：代理无法访问此游戏。",
   "horizon.agent.session_opened": "由启动游戏的程序为本次会话开启。",
   "horizon.agent.socket": "套接字：%s（复制详细信息以获取完整路径）",
-  "horizon.agent.local_only": "仅限本机：此电脑上的代理可用，网络不可用。"
+  "horizon.agent.local_only": "仅限本机：此电脑上的代理可用，网络不可用。",
+  "horizon.extras.header.shulkds": "ShulkDS",
+  "horizon.extras.shulkds_hotbar": "快捷栏位置",
+  "horizon.extras.shulkds_hotbar.tooltip": "选择快捷栏显示位置：下屏底部、下屏顶部，或上屏经验条下方的经典样式。",
+  "horizon.extras.shulkds_classic_crafting": "经典合成",
+  "horizon.extras.shulkds_classic_crafting.tooltip": "使用带配方书的经典 Java 2x2 和 3x3 手动合成网格，而不是主机版分页合成菜单。",
+  "horizon.extras.shulkds_classic_inventory": "经典背包",
+  "horizon.extras.shulkds_classic_inventory.tooltip": "按 Y/E 时在上屏打开经典的生存与创造背包界面，而不是下屏触控背包与主机版目录。",
+  "horizon.extras.shulkds_auto_updates": "自动更新",
+  "horizon.extras.shulkds_auto_updates.tooltip": "启动 ShulkDS 时检查 GitHub 发布页并在有新版本时提示下载安装。",
+  "horizon.shulkds.hotbar.bottom": "下屏（底部）",
+  "horizon.shulkds.hotbar.top": "下屏（顶部）",
+  "horizon.shulkds.hotbar.classic": "上屏（经典）",
+  "horizon.shulkds.check_updates": "检查更新"
 }

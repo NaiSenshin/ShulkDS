@@ -887,7 +887,7 @@ impl Game<'_> {
     /// The survival inventory's player box (`InventoryScreen`).
     pub(super) fn draw_inventory_player(&self, batch: &mut HudBatch, ox: f32, oy: f32) {
         if self.screen == Screen::Inventory {
-            if self.use_legacy_gui() {
+            if self.use_legacy_inventory_layout() {
                 self.draw_player_preview(
                     batch,
                     ox + 92.0,

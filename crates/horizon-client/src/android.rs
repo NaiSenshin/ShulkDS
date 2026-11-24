@@ -350,6 +350,21 @@ pub fn app_version() -> Option<(String, bool)> {
     .filter(|(name, _)| !name.is_empty())
 }
 
+/// This APK's Android applicationId (e.g. `dev.shulkds.client` or `dev.shulkds.client.dev`).
+pub fn package_id() -> Option<String> {
+    with_activity(|env, activity| {
+        let id = env
+            .call_method(activity, "packageId", "()Ljava/lang/String;", &[])?
+            .l()?;
+        if id.is_null() {
+            return Ok(None);
+        }
+        let s = String::from(env.get_string(&id.into())?);
+        Ok((!s.is_empty()).then_some(s))
+    })
+    .flatten()
+}
+
 /// Android's installer on `name`, an APK the game downloaded to files/updates/.
 pub fn install_update(name: &str) -> bool {
     with_activity(|env, activity| {

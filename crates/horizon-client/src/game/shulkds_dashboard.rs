@@ -11,7 +11,9 @@
 
 use super::Game;
 use horizon_client::{
-    dual_screen::{BottomPointerAction, DashboardTab, PointerButton, ViewportRect},
+    dual_screen::{
+        BottomPointerAction, DashboardTab, HotbarPosition, PointerButton, ViewportRect,
+    },
     graphics::{FrameGeneration, FsrUpscaling, Preset, Upscaling},
     hud::{HudBatch, MINIMAP_SPRITE},
     items::ItemStack,
@@ -39,6 +41,8 @@ const TEXT_WHITE: u32 = u32::from_le_bytes([0xFF, 0xFF, 0xFF, 0xFF]);
 
 /// Shared geometry for the bottom screen so rendering and hit-testing match 1:1.
 struct Bottom3dsLayout {
+    hotbar_pos: HotbarPosition,
+    show_hotbar: bool,
     tab_y: f32,
     tab_h: f32,
     content_x: f32,
@@ -53,25 +57,54 @@ struct Bottom3dsLayout {
 }
 
 impl Bottom3dsLayout {
-    fn compute(bx: f32, by: f32, bw: f32, bh: f32) -> Self {
+    fn compute(bx: f32, by: f32, bw: f32, bh: f32, hotbar_pos: HotbarPosition) -> Self {
         let tab_h = 24.0;
+        let show_hotbar = hotbar_pos != HotbarPosition::TopScreenClassic;
 
         let hotbar_scale = ((bw - 88.0) / 182.0).clamp(0.68, 1.25);
         let hotbar_w = (182.0 * hotbar_scale).round();
-        let hotbar_h = (22.0 * hotbar_scale).round();
+        let hotbar_h = if show_hotbar {
+            (22.0 * hotbar_scale).round()
+        } else {
+            0.0
+        };
         let hotbar_x = bx + ((bw - hotbar_w) / 2.0).floor();
 
         let content_x = bx + 3.0;
         let content_w = (bw - 6.0).max(40.0);
-        let content_h = (bh - tab_h - hotbar_h - 10.0).max(40.0);
+        let (content_h, total_stack_h) = if show_hotbar {
+            let ch = (bh - tab_h - hotbar_h - 10.0).clamp(40.0, 206.0);
+            (ch, tab_h + 2.0 + ch + 4.0 + hotbar_h)
+        } else {
+            let ch = (bh - tab_h - 16.0).clamp(40.0, 224.0);
+            (ch, tab_h + 2.0 + ch + 10.0)
+        };
 
-        let total_stack_h = tab_h + 2.0 + content_h + 4.0 + hotbar_h;
         let top_margin = ((bh - total_stack_h) * 0.5).floor().max(2.0);
-        let tab_y = by + top_margin;
-        let content_y = tab_y + tab_h + 2.0;
-        let hotbar_y = content_y + content_h + 4.0;
+        let (hotbar_y, tab_y, content_y) = match hotbar_pos {
+            HotbarPosition::BottomScreenBottom => {
+                let ty = by + top_margin;
+                let cy = ty + tab_h + 2.0;
+                let hy = cy + content_h + 4.0;
+                (hy, ty, cy)
+            }
+            HotbarPosition::BottomScreenTop => {
+                let hy = by + top_margin;
+                let ty = hy + hotbar_h + 4.0;
+                let cy = ty + tab_h + 2.0;
+                (hy, ty, cy)
+            }
+            HotbarPosition::TopScreenClassic => {
+                let ty = by + top_margin;
+                let cy = ty + tab_h + 2.0;
+                let hy = cy + content_h + 4.0;
+                (hy, ty, cy)
+            }
+        };
 
         Self {
+            hotbar_pos,
+            show_hotbar,
             tab_y,
             tab_h,
             content_x,
@@ -127,10 +160,13 @@ struct SurvivalInvLayout {
     armor_x: f32,
     armor_y0: f32,
     player_x: f32,
+    player_y: f32,
     player_w: f32,
     player_h: f32,
     bag_x0: f32,
     bag_y0: f32,
+    include_hotbar_row: bool,
+    hotbar_row_y: f32,
     offhand_x: f32,
     offhand_y: f32,
     offhand_sz: f32,
@@ -191,6 +227,7 @@ struct SettingsTabMetrics {
     val_w: f32,
     perf_y: f32,
     toggle_y: f32,
+    hud_y: f32,
     toggle_h: f32,
     reach_x: f32,
     reach_w: f32,
@@ -260,7 +297,8 @@ impl Game<'_> {
             return;
         }
         if self.remote.is_some() {
-            let allow_offhand = self.remote_menu().1 == "minecraft:inventory";
+            let allow_offhand =
+                matches!(self.remote_menu().1.as_str(), "inventory" | "minecraft:inventory");
             for _ in 0..36 {
                 let Some(carried) = self.carried.clone() else {
                     break;
@@ -651,7 +689,15 @@ impl Game<'_> {
     }
 
     fn bottom_3ds_layout(&self, bx: f32, by: f32, bw: f32, bh: f32) -> Bottom3dsLayout {
-        Bottom3dsLayout::compute(bx, by, bw, bh)
+        Bottom3dsLayout::compute(bx, by, bw, bh, self.settings.extras.shulkds_hotbar)
+    }
+
+    pub(super) fn should_auto_return_bottom_carried(
+        is_top_paused: bool,
+        has_carried: bool,
+        active_tab: DashboardTab,
+    ) -> bool {
+        !is_top_paused && has_carried && active_tab != DashboardTab::Inventory
     }
 
     /// Draw the complete bottom-screen touch dashboard within `rect`.
@@ -664,9 +710,11 @@ impl Game<'_> {
             self.draw_shulkds_title_bottom(batch, rect);
             return;
         }
-        if self.carried.is_some()
-            && self.shulkds.dashboard.active_tab != DashboardTab::Inventory
-        {
+        if Self::should_auto_return_bottom_carried(
+            self.is_shulkds_paused(),
+            self.carried.is_some(),
+            self.shulkds.dashboard.active_tab,
+        ) {
             self.return_shulkds_carried_to_inventory();
         }
         self.shulkds.dashboard.focus_rects.clear();
@@ -786,8 +834,10 @@ impl Game<'_> {
             }
         }
 
-        // 5. Persistent Bottom-Anchored Vanilla Hotbar (Always visible & tappable!)
-        self.draw_3ds_persistent_hotbar(batch, &lay);
+        // 5. Persistent Bottom Hotbar (when placed on the bottom screen) + device telemetry
+        if lay.show_hotbar {
+            self.draw_3ds_persistent_hotbar(batch, &lay);
+        }
         self.draw_shulkds_bottom_device_hud(batch, rect, &lay);
 
         if self.shulkds.dashboard.active_tab == DashboardTab::Minimap {
@@ -844,7 +894,11 @@ impl Game<'_> {
             if at.elapsed().as_secs_f32() < 2.5 {
                 let tw = HudBatch::text_width(&self.gui.atlas, msg);
                 let tx = bx + (bw - tw) / 2.0;
-                let ty = lay.hotbar_y - 14.0;
+                let ty = if lay.hotbar_pos == HotbarPosition::BottomScreenBottom {
+                    lay.hotbar_y - 14.0
+                } else {
+                    lay.content_y + lay.content_h - 15.0
+                };
                 batch.fill(&self.gui.atlas, tx - 4.0, ty - 2.0, tw + 8.0, 12.0, rgba(20, 20, 24, 215));
                 batch.text(&self.gui.atlas, msg, tx, ty, TEXT_WHITE, true);
             }
@@ -1063,7 +1117,7 @@ impl Game<'_> {
         };
         let ticks = self.world.day_time.rem_euclid(24_000);
         let day = self.world.day_time.div_euclid(24_000);
-        let day_str = format!("DAY: {day}");
+        let day_long = format!("DAY: {day}");
         let hour = ((ticks / 1000) + 6) % 24;
         let min = ((ticks % 1000) * 60) / 1000;
         let is_day = (6..18).contains(&hour);
@@ -1105,22 +1159,29 @@ impl Game<'_> {
         let right_edge = clock_x - 4.0;
         let avail_w = (right_edge - left_edge).max(0.0);
         if avail_w >= 14.0 {
+            let day_str = if HudBatch::text_width(&self.gui.atlas, &day_long) * 0.68 > avail_w {
+                format!("D{day}")
+            } else {
+                day_long
+            };
             let day_raw_w = HudBatch::text_width(&self.gui.atlas, &day_str).max(1.0);
             let day_scale = (avail_w / day_raw_w)
-                .min(header_scale * 0.92)
-                .clamp(0.50, header_scale);
+                .min(header_scale * 0.90)
+                .clamp(0.42, header_scale);
             let day_w = day_raw_w * day_scale;
-            let day_x = left_edge + ((avail_w - day_w) * 0.5).max(0.0);
-            let day_y = rm.header_y + (rm.header_h - 8.0 * day_scale) * 0.5;
-            batch.text_scaled(
-                &self.gui.atlas,
-                &day_str,
-                day_x,
-                day_y,
-                day_scale,
-                rgba(206, 214, 228, 255),
-                false,
-            );
+            if day_w <= avail_w + 0.5 {
+                let day_x = left_edge + ((avail_w - day_w) * 0.5).max(0.0);
+                let day_y = rm.header_y + (rm.header_h - 8.0 * day_scale) * 0.5;
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &day_str,
+                    day_x,
+                    day_y,
+                    day_scale,
+                    rgba(206, 214, 228, 255),
+                    false,
+                );
+            }
         }
         batch.text_scaled(
             &self.gui.atlas,
@@ -1273,23 +1334,41 @@ impl Game<'_> {
         w: f32,
         h: f32,
     ) -> SurvivalInvLayout {
-        let slot_size = ((h - 30.0) / 4.0)
+        let include_hotbar_row =
+            self.settings.extras.shulkds_hotbar == HotbarPosition::TopScreenClassic;
+        let grid_rows = if include_hotbar_row { 5.2 } else { 4.0 };
+        let slot_size = ((h - 30.0) / grid_rows)
             .floor()
             .min(((w - 4.0) / 11.0).floor())
-            .clamp(12.0, 30.0);
+            .clamp(12.0, 28.0);
+        let hotbar_gap = if include_hotbar_row {
+            (slot_size * 0.2).round().max(2.0)
+        } else {
+            0.0
+        };
+        let grid_h = if include_hotbar_row {
+            5.0 * slot_size + hotbar_gap
+        } else {
+            4.0 * slot_size
+        };
         let player_w = (w - 4.0 - 10.0 * slot_size)
             .floor()
             .clamp(slot_size, (slot_size * 1.6).floor());
-        let player_h = 4.0 * slot_size;
+        let player_h = grid_h;
         let total_w = 10.0 * slot_size + player_w + 4.0;
         let start_x = x + ((w - total_w) * 0.5).round().max(0.0);
-        let start_y = y + if h >= 140.0 { 3.0 } else { 1.0 };
+
+        let tray_h = (h - grid_h - 8.0).clamp(20.0, 32.0);
+        let block_h = grid_h + 5.0 + tray_h;
+        let start_y = y + ((h - block_h) * 0.5).floor().max(1.0);
 
         let armor_x = start_x;
         let armor_y0 = start_y;
         let player_x = armor_x + slot_size + 2.0;
+        let player_y = start_y;
         let bag_x0 = player_x + player_w + 2.0;
         let bag_y0 = start_y + slot_size;
+        let hotbar_row_y = bag_y0 + 3.0 * slot_size + hotbar_gap;
 
         // Top-right shelf sits strictly above the 9 backpack columns (`bag_x0..bag_x0 + 9 * slot_size`)
         let offhand_x = bag_x0;
@@ -1303,15 +1382,14 @@ impl Game<'_> {
         let info_w = (shelf_right - info_x).max(40.0);
 
         // Recessed grey action tray below the inventory grid, inside the outer white panel
-        let grid_bottom = start_y + player_h;
+        let grid_bottom = start_y + grid_h;
         let tray_x = start_x;
         let tray_w = total_w;
-        let tray_y = grid_bottom + 6.0;
-        let tray_h = (y + h - tray_y - 2.0).max(22.0);
+        let tray_y = grid_bottom + 5.0;
         let act_pad_x = 6.0;
         let act_x = tray_x + act_pad_x;
         let act_w = (tray_w - act_pad_x * 2.0).max(40.0);
-        let act_h = (tray_h - 14.0).clamp(16.0, 28.0);
+        let act_h = (tray_h - 10.0).clamp(14.0, 24.0);
         let act_y = tray_y + ((tray_h - act_h) * 0.5).floor();
 
         SurvivalInvLayout {
@@ -1319,10 +1397,13 @@ impl Game<'_> {
             armor_x,
             armor_y0,
             player_x,
+            player_y,
             player_w,
             player_h,
             bag_x0,
             bag_y0,
+            include_hotbar_row,
+            hotbar_row_y,
             offhand_x,
             offhand_y,
             offhand_sz,
@@ -1474,7 +1555,7 @@ impl Game<'_> {
         }
 
         // 3. Left Panel: Tall Sunken Black 3D Player Preview Box (tap to auto-equip)
-        let (px, py, pw, ph) = (m.player_x, m.armor_y0, m.player_w, m.player_h);
+        let (px, py, pw, ph) = (m.player_x, m.player_y, m.player_w, m.player_h);
         {
             let a = &self.gui.atlas;
             let dark = rgba(55, 55, 55, 255);
@@ -1488,10 +1569,17 @@ impl Game<'_> {
         let player_scale = (m.player_h * 0.36).min(m.player_w * 0.75).clamp(18.0, 38.0);
         let target_slot = self.shulkds.dashboard.active_slot.unwrap_or(self.selected);
         let target_center = match target_slot {
-            0..=8 => (
-                lay.hotbar_x + (11.0 + target_slot as f32 * 20.0) * lay.hotbar_scale,
-                lay.hotbar_y + 11.0 * lay.hotbar_scale,
-            ),
+            0..=8 => if m.include_hotbar_row {
+                (
+                    m.bag_x0 + (target_slot as f32 + 0.5) * m.slot_size,
+                    m.hotbar_row_y + 0.5 * m.slot_size,
+                )
+            } else {
+                (
+                    lay.hotbar_x + (11.0 + target_slot as f32 * 20.0) * lay.hotbar_scale,
+                    lay.hotbar_y + 11.0 * lay.hotbar_scale,
+                )
+            },
             9..=35 => {
                 let idx = target_slot - 9;
                 let row = idx / 9;
@@ -1576,6 +1664,20 @@ impl Game<'_> {
             m.slot_size,
             m.slot_size,
         );
+        if m.include_hotbar_row {
+            for col in 0..9 {
+                let sx = m.bag_x0 + col as f32 * m.slot_size;
+                self.draw_3ds_interactive_slot(
+                    batch,
+                    col,
+                    sx,
+                    m.hotbar_row_y,
+                    m.slot_size,
+                    col == self.selected,
+                    None,
+                );
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1620,9 +1722,9 @@ impl Game<'_> {
         let row_x = x + 2.0;
         let row_w = (w - 4.0).max(60.0);
         let rows_y0 = if show_header { y + header_h + 4.0 } else { y + 1.0 };
-        let avail_h = (y + h - rows_y0 - 2.0).max(64.0);
-        let row_step = (avail_h / 6.0).floor().clamp(11.0, 24.0);
-        let row_h = (row_step - 2.0).max(10.0);
+        let avail_h = (y + h - rows_y0 - 2.0).max(74.0);
+        let row_step = (avail_h / 7.0).floor().clamp(10.0, 22.0);
+        let row_h = (row_step - 2.0).max(9.0);
 
         let pad = 4.0;
         let label_x = row_x + pad;
@@ -1637,7 +1739,8 @@ impl Game<'_> {
 
         let perf_y = rows_y0 + 4.0 * row_step + 1.0;
         let toggle_y = rows_y0 + 5.0 * row_step + 1.0;
-        let toggle_h = row_h.min((y + h - toggle_y - 1.0).max(10.0));
+        let hud_y = rows_y0 + 6.0 * row_step + 1.0;
+        let toggle_h = (row_step - 2.0).clamp(10.0, 20.0).min((y + h - hud_y - 1.0).max(10.0));
         let gap = 4.0;
         let reach_w = ((row_w - gap) * 0.5).floor();
         let reach_x = row_x;
@@ -1665,6 +1768,7 @@ impl Game<'_> {
             val_w,
             perf_y,
             toggle_y,
+            hud_y,
             toggle_h,
             reach_x,
             reach_w,
@@ -1870,6 +1974,19 @@ impl Game<'_> {
             !self.camera_type.first_person(),
             0.88,
         );
+
+        let hotbar_pos = self.settings.extras.shulkds_hotbar;
+        let hotbar_lbl = format!("Hotbar: {}", hotbar_pos.short_label());
+        self.draw_3ds_button_scaled(
+            batch,
+            m.row_x,
+            m.hud_y,
+            m.row_w,
+            m.toggle_h,
+            &hotbar_lbl,
+            hotbar_pos != HotbarPosition::BottomScreenBottom,
+            0.88,
+        );
     }
 
     /// Look up the rendered slot at `(lx, ly)` relative to the bottom viewport using populated `focus_rects`.
@@ -1929,8 +2046,12 @@ impl Game<'_> {
                 self.settings.horizon.frame_generation as u8,
                 u8::from(self.settings.controller.reach_around),
                 self.camera_type as u8,
+                self.settings.extras.shulkds_hotbar as u8,
+                u8::from(self.settings.extras.shulkds_classic_crafting),
+                u8::from(self.settings.extras.shulkds_classic_inventory),
             ],
         );
+        mix_bytes(&mut h, &self.shulkds_update_sig().to_le_bytes());
         mix_opt_stack(&mut h, self.carried.as_ref());
         mix_bytes(
             &mut h,
@@ -2128,9 +2249,12 @@ impl Game<'_> {
             }
         }
 
-        // 2. Check Persistent Bottom Hotbar taps (active on ALL tabs!)
-        if ly >= lay.hotbar_y && ly <= (lay.hotbar_y + lay.hotbar_h)
-            && lx >= lay.hotbar_x && lx <= (lay.hotbar_x + lay.hotbar_w)
+        // 2. Check Persistent Bottom Hotbar taps (when placed on bottom screen)
+        if lay.show_hotbar
+            && ly >= lay.hotbar_y
+            && ly <= (lay.hotbar_y + lay.hotbar_h)
+            && lx >= lay.hotbar_x
+            && lx <= (lay.hotbar_x + lay.hotbar_w)
         {
             let col = ((lx - lay.hotbar_x) / (20.0 * lay.hotbar_scale)).floor() as isize;
             if (0..9).contains(&col) {
@@ -2279,8 +2403,8 @@ impl Game<'_> {
         // 4. Player Preview Box (tap character to auto-equip best armor)
         if lx >= m.player_x
             && lx <= m.player_x + m.player_w
-            && ly >= m.armor_y0
-            && ly <= m.armor_y0 + m.player_h
+            && ly >= m.player_y
+            && ly <= m.player_y + m.player_h
         {
             self.execute_auto_equip();
             self.audio.play_button_click();
@@ -2288,7 +2412,7 @@ impl Game<'_> {
         }
 
         // 5. Contiguous 3x9 Backpack Grid
-        let _ = self.check_inventory_grid_tap(
+        if self.check_inventory_grid_tap(
             lx,
             ly,
             m.bag_x0,
@@ -2298,7 +2422,23 @@ impl Game<'_> {
             m.slot_size,
             m.slot_size,
             right_click,
-        );
+        ) {
+            return;
+        }
+
+        // 6. Hotbar row inside Inv tab when Classic Top Hotbar is active
+        if m.include_hotbar_row
+            && ly >= m.hotbar_row_y
+            && ly <= m.hotbar_row_y + m.slot_size
+        {
+            for col in 0..9 {
+                let sx = m.bag_x0 + col as f32 * m.slot_size;
+                if lx >= sx && lx <= sx + m.slot_size {
+                    self.handle_slot_click_interact(col, right_click, false);
+                    return;
+                }
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2507,7 +2647,19 @@ impl Game<'_> {
                 };
                 self.shulkds.dashboard.set_status(format!("Camera: {cam}"));
                 self.audio.play_button_click();
+                return;
             }
+        }
+
+        if ly >= m.hud_y && ly <= m.hud_y + m.toggle_h && lx >= m.row_x && lx <= m.row_x + m.row_w
+        {
+            let next = self.settings.extras.shulkds_hotbar.cycle(false);
+            self.settings.extras.shulkds_hotbar = next;
+            self.settings.save(&Self::options_path());
+            self.shulkds
+                .dashboard
+                .set_status(format!("Hotbar: {}", next.short_label()));
+            self.audio.play_button_click();
         }
     }
 
@@ -2913,7 +3065,8 @@ impl Game<'_> {
             && let Some(comp) = &self.secondary_compositor
         {
             let sec_size = comp.size();
-            let sec_hud = HudBatch::new(sec_size);
+            let sec_hud =
+                HudBatch::new_shulkds_bottom(sec_size, self.shulkds.config.touch_gui_scale);
             return ViewportRect::new(
                 0.0,
                 0.0,
@@ -2938,7 +3091,7 @@ impl Game<'_> {
         };
         let (req_w, req_h) = if self.title.is_some() {
             (340.0, 224.0)
-        } else if self.screen == super::Screen::Creative && self.use_legacy_gui() {
+        } else if self.screen == super::Screen::Creative && self.use_legacy_creative() {
             (324.0, 218.0)
         } else if self.legacy_crafting_open() {
             (348.0, 220.0)
@@ -3216,19 +3369,30 @@ impl Game<'_> {
         const CAVITY_ALPHA: u8 = 112;
         const SHADOW_ALPHA: u8 = 108;
 
-        // Bottom-left: phone local time in Minecraft font.
+        // Left corner: phone local time in Minecraft font.
         let time_str = horizon_client::dual_screen_android::format_local_clock(
             status.hour,
             status.minute,
             status.use_24h,
         );
         let a = &self.gui.atlas;
-        let left_limit = lay.hotbar_x - lay.hotbar_scale - 3.0;
+        let left_limit = if lay.show_hotbar {
+            lay.hotbar_x - lay.hotbar_scale - 3.0
+        } else {
+            rect.x + rect.width * 0.45
+        };
         let tx = (rect.x + 4.0).floor();
         let avail_w = (left_limit - tx).max(18.0);
         let raw_tw = HudBatch::text_width(a, &time_str).max(1.0);
         let text_scale = (avail_w / raw_tw).clamp(0.60, 1.0);
-        let ty = (rect.y + rect.height - 4.0 - 8.0 * text_scale).floor();
+        let top_aligned = lay.hotbar_pos == HotbarPosition::BottomScreenTop;
+        let ty = if top_aligned {
+            (lay.hotbar_y + (lay.hotbar_h - 8.0 * text_scale) * 0.5)
+                .floor()
+                .max(rect.y + 2.0)
+        } else {
+            (rect.y + rect.height - 4.0 - 8.0 * text_scale).floor()
+        };
         batch.text_scaled(
             a,
             &time_str,
@@ -3239,7 +3403,7 @@ impl Game<'_> {
             true,
         );
 
-        // Bottom-right: crisp pixelated battery icon.
+        // Right corner: crisp pixelated battery icon.
         let Some((pct, charging)) = status.battery else {
             return;
         };
@@ -3248,11 +3412,18 @@ impl Game<'_> {
             - 4.0
             - horizon_client::dual_screen_android::BATTERY_SHELL_W)
             .floor();
-        let by = (rect.y
-            + rect.height
-            - 4.0
-            - horizon_client::dual_screen_android::BATTERY_SHELL_H)
-            .floor();
+        let by = if top_aligned {
+            (lay.hotbar_y
+                + (lay.hotbar_h - horizon_client::dual_screen_android::BATTERY_SHELL_H) * 0.5)
+                .floor()
+                .max(rect.y + 2.0)
+        } else {
+            (rect.y
+                + rect.height
+                - 4.0
+                - horizon_client::dual_screen_android::BATTERY_SHELL_H)
+                .floor()
+        };
         let grid = horizon_client::dual_screen_android::battery_pixel_grid(pct, charging);
         let (fill_hi, fill_body) = if charging {
             (
@@ -3386,7 +3557,8 @@ impl Game<'_> {
             if self.shulkds.dashboard.last_bottom_sig != loading_sig
                 || elapsed >= std::time::Duration::from_millis(500)
             {
-                let mut sec_hud = HudBatch::new(sec_size);
+                let mut sec_hud =
+                    HudBatch::new_shulkds_bottom(sec_size, self.shulkds.config.touch_gui_scale);
                 let bottom_rect = ViewportRect::new(
                     0.0,
                     0.0,
@@ -3404,5 +3576,46 @@ impl Game<'_> {
             }
             self.secondary_compositor = Some(comp);
         }
+    }
+}
+
+#[cfg(test)]
+mod classic_carried_tests {
+    use super::*;
+
+    #[test]
+    fn paused_top_screen_keeps_carried_item_regardless_of_bottom_tab() {
+        for tab in [
+            DashboardTab::Minimap,
+            DashboardTab::Inventory,
+            DashboardTab::Settings,
+        ] {
+            assert!(!Game::should_auto_return_bottom_carried(true, true, tab));
+            assert!(!Game::should_auto_return_bottom_carried(true, false, tab));
+        }
+    }
+
+    #[test]
+    fn playing_top_screen_only_returns_carried_item_off_inventory_tab() {
+        assert!(Game::should_auto_return_bottom_carried(
+            false,
+            true,
+            DashboardTab::Minimap
+        ));
+        assert!(Game::should_auto_return_bottom_carried(
+            false,
+            true,
+            DashboardTab::Settings
+        ));
+        assert!(!Game::should_auto_return_bottom_carried(
+            false,
+            true,
+            DashboardTab::Inventory
+        ));
+        assert!(!Game::should_auto_return_bottom_carried(
+            false,
+            false,
+            DashboardTab::Minimap
+        ));
     }
 }
