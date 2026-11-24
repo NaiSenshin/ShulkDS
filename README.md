@@ -44,7 +44,7 @@ ShulkDS is a dual-screen Android fork of [Horizon](https://github.com/horizon-ru
 - [ ] `Feature` Fast crafting (hold craft button)
 - [ ] `Compatibility` Support additional Minecraft mods
 - [ ] `Feature` Built-in mod manager
-- [ ] `Feature` Complete French localization
+- [ ] `Feature` Complete Multi-Language localization
 - [ ] `Feature` Local/offline account support
 
 ### Low Priority
