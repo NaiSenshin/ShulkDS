@@ -76,3 +76,11 @@ The built APK outputs to `target/android/shulkds-1.0.2-arm64-v8a.apk`. No Minecr
 Built on [Horizon](https://github.com/horizon-rust/horizon) by Ludovic Marie and contributors, and [Starling](https://github.com/starling-client/starling) by JuanLuci and Vasysik, both under the MIT License, along with LGPL-3.0 code and UI assets from **Distant Horizons**, **Legacy4J**, and **Controlify**.
 
 Original Horizon, Starling, and ShulkDS code stays MIT-licensed, while the combined project is distributed under **LGPL-3.0**. See [LICENSE](LICENSE), [LGPL-3.0](licenses/LGPL-3.0.txt), [GPL-3.0](licenses/GPL-3.0.txt), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full credits and license texts.
+
+## Support
+
+If you enjoy ShulkDS on your handheld and want to support ongoing dual-screen updates and fixes, you can buy me a coffee on Ko-fi. ShulkDS will always stay free and open-source.
+
+<p align="center">
+  <a href="https://ko-fi.com/itssenshin"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi"></a>
+</p>
