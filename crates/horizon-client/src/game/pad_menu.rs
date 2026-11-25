@@ -125,6 +125,14 @@ impl MenuCursor {
         self.slider_edit = false;
         self.pending = None;
     }
+
+    pub(super) fn close_osk(&mut self) -> bool {
+        if self.osk.take().is_some() {
+            self.osk_dismissed = true;
+            return true;
+        }
+        false
+    }
 }
 
 impl Game<'_> {
@@ -540,7 +548,20 @@ impl Game<'_> {
             return Ok(());
         }
         match button {
-            Button::East | Button::Start => return self.pad_back(),
+            Button::East => {
+                let keep_screen = !matches!(self.screen, Screen::Chat)
+                    && self.sign_edit.is_none()
+                    && self.book.is_none()
+                    && self.command_block_screen.is_none();
+                if self.dismiss_soft_keyboard() && keep_screen {
+                    return Ok(());
+                }
+                return self.pad_back();
+            }
+            Button::Start => {
+                let _ = self.dismiss_soft_keyboard();
+                return self.pad_back();
+            }
             Button::RightStick => {
                 // Swap focus and pointer for this screen.
                 self.pad.menu.swapped = !self.pad.menu.swapped;
@@ -850,6 +871,7 @@ impl Game<'_> {
     /// another page of mods' tabs shows its page: clicking where it would be would hit the
     /// tab drawn there on this page.
     fn pad_creative_tab(&mut self, next: bool) {
+        self.dismiss_soft_keyboard();
         if self.use_legacy_creative() {
             self.legacy_creative_cycle_tab(next);
             return;
@@ -1444,6 +1466,7 @@ impl Game<'_> {
                     cx >= x && cy >= y && cx < x + w && cy < y + h
                 })
                 .map(|t| t.rect);
+            self.pad.menu.close_osk();
         }
     }
 
@@ -1508,15 +1531,19 @@ impl Game<'_> {
         (self.screen == Screen::Chat && self.title.is_none())
             || self.sign_edit.is_some()
             || matches!(self.book, Some(super::books::BookScreen::Edit { .. }))
+            || self.legacy_creative_search_active()
             || (self.screen == Screen::Creative && self.creative_screen.tab().search)
             || self.recipe_search_focused()
             || self.station_typing()
     }
 
-    /// Open the on-screen keyboard over the focused field: Horizon's, or
-    /// Steam's on a Steam Deck (`steam://open/keyboard`, which types into
-    /// the window like a real keyboard).
+    /// Open the on-screen keyboard over the focused field: Android's soft keyboard
+    /// in ShulkDS mode, Steam's on a Steam Deck, else Horizon's controller grid.
     fn pad_open_keyboard(&mut self) {
+        if cfg!(target_os = "android") && self.shulkds.config.enabled {
+            self.request_field_soft_keyboard();
+            return;
+        }
         // Without xdg-open (macOS, Windows), Horizon's keyboard instead.
         if gamepad::steam_keyboard(self.settings.controller.keyboard)
             && std::process::Command::new("xdg-open")
@@ -1576,6 +1603,23 @@ impl Game<'_> {
             self.sign_input(key, text);
         } else if self.book.is_some() {
             self.book_input(key, text);
+        } else if self.legacy_creative_search_active() {
+            let tab = self.legacy_creative.tab;
+            if backspace {
+                self.legacy_creative
+                    .search
+                    .key(KeyCode::Backspace, false, false);
+                if tab < self.legacy_creative.scroll_rows.len() {
+                    self.legacy_creative.scroll_rows[tab] = 0;
+                }
+            } else if key != Some(KeyCode::Enter)
+                && let Some(t) = text
+            {
+                self.legacy_creative.search.insert_text(t);
+                if tab < self.legacy_creative.scroll_rows.len() {
+                    self.legacy_creative.scroll_rows[tab] = 0;
+                }
+            }
         } else if self.screen == Screen::Creative && self.creative_screen.tab().search {
             if backspace {
                 self.creative_search_backspace(false);

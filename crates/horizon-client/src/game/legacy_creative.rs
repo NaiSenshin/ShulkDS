@@ -406,6 +406,7 @@ impl Game<'_> {
         // 1. Page arrows.
         if !right && tabs.len() > TABS_PER_PAGE {
             if page > 0 && mx >= ox - 14.0 && mx < ox && my >= oy - 33.0 && my < oy {
+                self.dismiss_soft_keyboard();
                 self.legacy_creative.tab = (page - 1) * TABS_PER_PAGE;
                 self.audio.play_button_click();
                 return;
@@ -416,6 +417,7 @@ impl Game<'_> {
                 && my >= oy - 33.0
                 && my < oy
             {
+                self.dismiss_soft_keyboard();
                 self.legacy_creative.tab = ((page + 1) * TABS_PER_PAGE).min(tabs.len() - 1);
                 self.audio.play_button_click();
                 return;
@@ -427,7 +429,13 @@ impl Game<'_> {
             for idx in 0..tab_count {
                 let tx = ox + idx as f32 * 40.0;
                 if mx >= tx && mx < tx + 40.0 {
-                    self.legacy_creative.tab = page_start + idx;
+                    let next_tab = page_start + idx;
+                    self.legacy_creative.tab = next_tab;
+                    if tabs[next_tab].id == "legacy:search" {
+                        self.request_field_soft_keyboard();
+                    } else {
+                        self.dismiss_soft_keyboard();
+                    }
                     self.audio.play_button_click();
                     return;
                 }
@@ -445,9 +453,11 @@ impl Game<'_> {
                 self.legacy_creative
                     .search
                     .click(&self.gui.atlas, mx, shift, false);
+                self.request_field_soft_keyboard();
                 return;
             }
         }
+        self.dismiss_soft_keyboard();
 
         let items = self.creative_tab_items(tab_idx);
         let max_scroll = items.len().div_ceil(10).saturating_sub(5);
@@ -695,11 +705,28 @@ impl Game<'_> {
         true
     }
 
+    pub(super) fn legacy_creative_search_active(&self) -> bool {
+        if self.screen != Screen::Creative || !self.use_legacy_creative() {
+            return false;
+        }
+        let tabs = creative_tabs();
+        !tabs.is_empty() && tabs[self.legacy_creative.tab.min(tabs.len() - 1)].id == "legacy:search"
+    }
+
+    pub(super) fn legacy_creative_search_rect(&self, batch: &HudBatch) -> Option<[f32; 4]> {
+        if !self.legacy_creative_search_active() {
+            return None;
+        }
+        let (ox, oy) = self.legacy_screen_origin(batch)?;
+        Some([ox + (321.0 - 200.0) * 0.5 - 6.0, oy + 7.0, 200.0, 18.0])
+    }
+
     pub(super) fn legacy_creative_cycle_tab(&mut self, next: bool) {
         let count = creative_tabs().len();
         if count == 0 {
             return;
         }
+        self.dismiss_soft_keyboard();
         let cur = self.legacy_creative.tab.min(count - 1);
         self.legacy_creative.tab = if next {
             (cur + 1) % count

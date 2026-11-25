@@ -762,8 +762,10 @@ impl Game<'_> {
         ) {
             return false;
         }
-        if should_suppress_mobile_touch_hud(self.shulkds.config.enabled, self.touch.editor.is_some())
-            && self.touch_playing()
+        if should_suppress_mobile_touch_hud(
+            self.shulkds.config.enabled,
+            self.touch.editor.is_some(),
+        ) && self.touch_playing()
         {
             // Ignore accidental Display 0 touches during gameplay without stealing controller focus.
             return true;
@@ -1013,19 +1015,17 @@ impl Game<'_> {
         if context != self.touch.context {
             self.touch.context = context;
             let in_bed_chat = self.ui.in_bed_chat && self.sleeping.is_some();
-            self.touch.wanted = if in_bed_chat {
-                false
-            } else if self.shulkds.config.enabled {
-                context.is_some() && !(context == Some("title") && self.shulkds_title_split_mode())
-            } else {
-                matches!(
+            self.touch.wanted = !in_bed_chat
+                && (matches!(
                     context,
                     Some("chat" | "sign" | "book" | "command" | "mod" | "catalog")
-                )
-            };
+                ) || (self.shulkds.config.enabled
+                    && context == Some("title")
+                    && !self.shulkds_title_split_mode()));
             // The finger that opened it lifts on the new screen: that is not a tap beside its field.
             if self.touch.wanted {
                 self.touch.tap_from = None;
+                self.touch.ime_seen = false;
             }
         }
         #[cfg(target_os = "android")]
@@ -1043,9 +1043,11 @@ impl Game<'_> {
             && self.focused;
         // On Android the keyboard's editor shows it (text_mirror.rs).
         #[cfg(target_os = "android")]
-        if self.window.is_some() {
-            self.android_keyboard(keyboard);
-        }
+        let keyboard = if self.window.is_some() {
+            self.android_keyboard(keyboard)
+        } else {
+            keyboard
+        };
         #[cfg(not(target_os = "android"))]
         if keyboard != self.touch.keyboard
             && let Some(window) = &self.window
@@ -1100,6 +1102,7 @@ impl Game<'_> {
         if wanted {
             self.touch.context = Some(context);
             self.touch.keyboard_request = true;
+            self.touch.ime_seen = false;
         }
     }
 
@@ -1122,7 +1125,74 @@ impl Game<'_> {
         self.touch.context = self.text_context().or(Some("manual"));
         self.touch.wanted = true;
         self.touch.keyboard_request = true;
-        self.android_keyboard(true);
+        self.touch.ime_seen = false;
+        if self.window.is_some() {
+            self.touch.keyboard = self.android_keyboard(true);
+        }
+    }
+
+    pub(in crate::game) fn shulkds_text_caret_shown(&self) -> bool {
+        !cfg!(target_os = "android") || self.touch.wanted
+    }
+
+    pub(in crate::game) fn soft_keyboard_open(&self) -> bool {
+        if self.pad.menu.osk.is_some() || self.touch.wanted || self.touch.keyboard {
+            return true;
+        }
+        #[cfg(target_os = "android")]
+        if self.touch.mirror.is_shown()
+            || horizon_client::dual_screen_android::secondary_ime_active()
+            || crate::android::ime_height() > 0
+            || self.mobile_keyboard_active()
+        {
+            return true;
+        }
+        false
+    }
+
+    pub(in crate::game) fn request_field_soft_keyboard(&mut self) {
+        #[cfg(target_os = "android")]
+        self.touch_request_keyboard();
+    }
+
+    /// Dismiss any open Android IME / TextMirror or controller OSK. Returns true if one was open.
+    pub(in crate::game) fn dismiss_soft_keyboard(&mut self) -> bool {
+        let was_open = self.soft_keyboard_open();
+        self.pad.menu.close_osk();
+        self.touch.wanted = false;
+        self.touch.keyboard_request = false;
+        self.touch.ime_seen = false;
+        if self.touch.context == Some("manual") {
+            self.touch.context = None;
+        }
+        #[cfg(target_os = "android")]
+        {
+            if self.mobile_keyboard_active() {
+                self.mobile_hide_keyboard();
+            }
+            let mirror_pushed_hide = if self.window.is_some() {
+                let was_mirror_shown = self.touch.mirror.is_shown();
+                let _ = self.android_keyboard(false);
+                was_mirror_shown
+            } else {
+                false
+            };
+            if was_open && !mirror_pushed_hide {
+                crate::android::hide_text_mirror();
+            }
+            if was_open {
+                crate::android::hide_keyboard();
+            }
+            self.touch.keyboard = false;
+        }
+        #[cfg(not(target_os = "android"))]
+        if self.touch.keyboard
+            && let Some(window) = &self.window
+        {
+            window.set_ime_allowed(false);
+            self.touch.keyboard = false;
+        }
+        was_open
     }
 
     #[cfg(target_os = "android")]
@@ -1169,7 +1239,13 @@ impl Game<'_> {
             Some("command")
         } else if self.station_typing() {
             Some("anvil")
-        } else if self.screen == Screen::Creative && self.creative_screen.tab().search {
+        } else if self.screen == Screen::Creative
+            && if self.use_legacy_creative() {
+                self.legacy_creative_search_active()
+            } else {
+                self.creative_screen.tab().search
+            }
+        {
             Some("creative")
         } else if self.recipe_search_focused() {
             Some("recipe")
@@ -1226,15 +1302,23 @@ impl Game<'_> {
             "book" => Some([w / 2.0 - 66.0, 26.0, 132.0, 140.0]),
             // CommandBlockEditScreen's command box.
             "command" => Some([w / 2.0 - 150.0, 50.0, 300.0, 20.0]),
-            // AnvilScreen's name box (62, 24), 103 wide.
+            // AnvilScreen's name box (Legacy4J 72,26 120x18; vanilla 62,24 103x12).
             "anvil" => {
                 let (ox, oy) = self.inventory_origin(&batch);
-                Some([ox + 60.0, oy + 21.0, 107.0, 16.0])
+                if self.use_legacy_gui() {
+                    Some([ox + 70.0, oy + 24.0, 124.0, 22.0])
+                } else {
+                    Some([ox + 60.0, oy + 21.0, 107.0, 16.0])
+                }
             }
-            // CreativeModeInventoryScreen's search box (82, 6), 80 wide.
+            // CreativeModeInventoryScreen's search box (Legacy4J centered; vanilla 82,6).
             "creative" => {
-                let (ox, oy) = Self::creative_origin(&batch);
-                Some([ox + 80.0, oy + 3.0, 86.0, 14.0])
+                if self.use_legacy_creative() {
+                    self.legacy_creative_search_rect(&batch)
+                } else {
+                    let (ox, oy) = Self::creative_origin(&batch);
+                    Some([ox + 80.0, oy + 3.0, 86.0, 14.0])
+                }
             }
             _ => None,
         }
@@ -1450,8 +1534,10 @@ impl Game<'_> {
             self.mobile_draw(batch);
             return;
         }
-        if should_suppress_mobile_touch_hud(self.shulkds.config.enabled, self.touch.editor.is_some())
-            && !self.touch_closable()
+        if should_suppress_mobile_touch_hud(
+            self.shulkds.config.enabled,
+            self.touch.editor.is_some(),
+        ) && !self.touch_closable()
         {
             return;
         }
@@ -2113,12 +2199,20 @@ mod shulkds_touch_tests {
     fn emulated_bottom_viewport_claims_touch_events() {
         let bottom = horizon_client::dual_screen::ViewportRect::new(160.0, 564.0, 640.0, 480.0);
         // Touch inside bottom viewport in Emulated mode is yielded to ShulkDS bottom handler
-        assert!(shulkds_emulated_bottom_claims_touch(true, bottom, 400.0, 700.0, false));
+        assert!(shulkds_emulated_bottom_claims_touch(
+            true, bottom, 400.0, 700.0, false
+        ));
         // Active bottom drag continues claiming touch even outside bottom rect
-        assert!(shulkds_emulated_bottom_claims_touch(true, bottom, 400.0, 200.0, true));
+        assert!(shulkds_emulated_bottom_claims_touch(
+            true, bottom, 400.0, 200.0, true
+        ));
         // Touch on top viewport in Emulated mode without active drag is not claimed by bottom
-        assert!(!shulkds_emulated_bottom_claims_touch(true, bottom, 400.0, 200.0, false));
+        assert!(!shulkds_emulated_bottom_claims_touch(
+            true, bottom, 400.0, 200.0, false
+        ));
         // In DualWindow mode, Display 0 never claims bottom viewport touches
-        assert!(!shulkds_emulated_bottom_claims_touch(false, bottom, 400.0, 700.0, true));
+        assert!(!shulkds_emulated_bottom_claims_touch(
+            false, bottom, 400.0, 700.0, true
+        ));
     }
 }

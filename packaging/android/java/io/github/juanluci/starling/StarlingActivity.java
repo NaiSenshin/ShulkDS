@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -11,6 +12,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.Sensor;
@@ -138,11 +140,57 @@ public class StarlingActivity extends NativeActivity {
     /** Android took back the pointer the game had captured (android_lib.rs). */
     private static native void onPointerCaptureLost();
 
+    /** Hardware hinge angle sensor updated (degrees). */
+    private static native void onClamshellHingeAngle(float degrees);
+
+    /** OS display power / screen state changed. */
+    private static native void onScreenPowerChanged(boolean interactive);
+
     /** The game holds the pointer (capturePointer); on the UI thread only. */
     private boolean pointerWanted;
 
     private ClipboardManager clipboard;
     private SecondaryDisplay secondaryDisplay;
+    private SensorManager sensorManager;
+    private Sensor hingeSensor;
+    private boolean hingeRegistered;
+    private boolean hingeSeenOpen;
+    private boolean hingeClosed;
+    private boolean screenOff;
+    private volatile boolean lidSleepEnabled = true;
+    private View lidSleepScrim;
+    private BroadcastReceiver screenPowerReceiver;
+
+    private final SensorEventListener hingeListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (event.values == null || event.values.length == 0) {
+                return;
+            }
+            float deg = event.values[0];
+            if (Float.isNaN(deg) || Float.isInfinite(deg) || deg < 0f) {
+                return;
+            }
+            boolean prevClosed = hingeClosed;
+            if (deg >= 30f) {
+                hingeSeenOpen = true;
+            }
+            if (hingeSeenOpen) {
+                if (deg <= 15f) {
+                    hingeClosed = true;
+                } else if (deg >= 28f) {
+                    hingeClosed = false;
+                }
+            }
+            onClamshellHingeAngle(deg);
+            if (hingeClosed != prevClosed) {
+                applyLidSleepWindowState();
+            }
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    };
 
     /** The game has drawn: the window may show (firstFrame). */
     private volatile boolean drawn;
@@ -249,6 +297,80 @@ public class StarlingActivity extends NativeActivity {
         }
         hideSystemBars();
         applyMaxRefreshRate();
+
+        lidSleepScrim = new View(this);
+        lidSleepScrim.setBackgroundColor(Color.BLACK);
+        lidSleepScrim.setClickable(false);
+        lidSleepScrim.setFocusable(false);
+        lidSleepScrim.setFocusableInTouchMode(false);
+        lidSleepScrim.setVisibility(View.GONE);
+        addContentView(lidSleepScrim, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (Build.VERSION.SDK_INT >= 30 && sensorManager != null) {
+            hingeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE);
+        }
+
+        screenPowerReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null) {
+                    return;
+                }
+                String action = intent.getAction();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    screenOff = true;
+                    onScreenPowerChanged(false);
+                    applyLidSleepWindowState();
+                } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                    screenOff = false;
+                    onScreenPowerChanged(true);
+                    applyLidSleepWindowState();
+                }
+            }
+        };
+        IntentFilter powerFilter = new IntentFilter();
+        powerFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        powerFilter.addAction(Intent.ACTION_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenPowerReceiver, powerFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenPowerReceiver, powerFilter);
+        }
+    }
+
+    public void setLidSleepEnabled(final boolean enabled) {
+        lidSleepEnabled = enabled;
+        applyLidSleepWindowState();
+    }
+
+    private void applyLidSleepWindowState() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                boolean sleeping = lidSleepEnabled && (hingeClosed || screenOff);
+                Window win = getWindow();
+                if (win != null) {
+                    if (sleeping) {
+                        win.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    } else {
+                        win.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    }
+                }
+                if (lidSleepScrim != null) {
+                    lidSleepScrim.setVisibility(
+                            (lidSleepEnabled && hingeClosed) ? View.VISIBLE : View.GONE);
+                }
+                if (secondaryDisplay != null) {
+                    secondaryDisplay.setSleeping(sleeping);
+                }
+                if (!sleeping) {
+                    hideSystemBars();
+                }
+            }
+        });
     }
 
     @Override
@@ -439,9 +561,22 @@ public class StarlingActivity extends NativeActivity {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     protected void onResume() {
         super.onResume();
         applyMaxRefreshRate();
+        Display primary = Build.VERSION.SDK_INT >= 30
+                ? getDisplay()
+                : getWindowManager().getDefaultDisplay();
+        if (primary == null || primary.getState() != Display.STATE_OFF) {
+            screenOff = false;
+            onScreenPowerChanged(true);
+        }
+        applyLidSleepWindowState();
+        if (hingeSensor != null && sensorManager != null && !hingeRegistered) {
+            hingeRegistered = sensorManager.registerListener(
+                    hingeListener, hingeSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        }
         if (secondaryDisplay != null) {
             secondaryDisplay.resume();
         }
@@ -455,6 +590,10 @@ public class StarlingActivity extends NativeActivity {
 
     @Override
     protected void onPause() {
+        if (hingeRegistered && sensorManager != null) {
+            sensorManager.unregisterListener(hingeListener);
+            hingeRegistered = false;
+        }
         if (secondaryDisplay != null) {
             secondaryDisplay.pause();
         }
@@ -463,6 +602,18 @@ public class StarlingActivity extends NativeActivity {
 
     @Override
     protected void onDestroy() {
+        if (hingeRegistered && sensorManager != null) {
+            sensorManager.unregisterListener(hingeListener);
+            hingeRegistered = false;
+        }
+        if (screenPowerReceiver != null) {
+            try {
+                unregisterReceiver(screenPowerReceiver);
+            } catch (IllegalArgumentException ignored) {
+                // Already unregistered.
+            }
+            screenPowerReceiver = null;
+        }
         if (secondaryDisplay != null) {
             secondaryDisplay.destroy();
         }
@@ -476,10 +627,17 @@ public class StarlingActivity extends NativeActivity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                if (secondaryDisplay != null) {
+                    secondaryDisplay.hideKeyboard();
+                }
+                if (mirror != null) {
+                    mirror.hide();
+                }
                 InputMethodManager keyboard =
                         (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (keyboard != null) {
-                    keyboard.hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(), 0);
+                android.os.IBinder token = getWindow().getDecorView().getWindowToken();
+                if (keyboard != null && token != null) {
+                    keyboard.hideSoftInputFromWindow(token, 0);
                 }
             }
         });
@@ -506,6 +664,13 @@ public class StarlingActivity extends NativeActivity {
                 }
                 if (mirror == null) {
                     mirror = new TextMirror(StarlingActivity.this);
+                    mirror.setDismissListener(new Runnable() {
+                        @Override
+                        public void run() {
+                            mirror.hide();
+                            TextMirror.onMirrorDismissed();
+                        }
+                    });
                     addContentView(mirror, new android.view.ViewGroup.LayoutParams(1, 1));
                 }
                 mirror.show(text, cursor, anchor, maxLength, flags, generation);
@@ -542,6 +707,12 @@ public class StarlingActivity extends NativeActivity {
                     mirror.hide();
                 }
                 android.view.View game = getWindow().getDecorView();
+                InputMethodManager keyboard =
+                        (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                android.os.IBinder token = game.getWindowToken();
+                if (keyboard != null && token != null) {
+                    keyboard.hideSoftInputFromWindow(token, 0);
+                }
                 game.setFocusableInTouchMode(true);
                 game.requestFocus();
             }

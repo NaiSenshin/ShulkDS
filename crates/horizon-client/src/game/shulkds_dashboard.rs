@@ -12,7 +12,8 @@
 use super::Game;
 use horizon_client::{
     dual_screen::{
-        BottomPointerAction, DashboardTab, HotbarPosition, PointerButton, ViewportRect,
+        BottomPointerAction, DashboardTab, HotbarPosition, LidSleepMode, PointerButton,
+        ViewportRect,
     },
     graphics::{FrameGeneration, FsrUpscaling, Preset, Upscaling},
     hud::{HudBatch, MINIMAP_SPRITE},
@@ -187,14 +188,16 @@ struct SurvivalInvLayout {
 struct MapRightLayout {
     rx: f32,
     rw: f32,
-    header_y: f32,
-    header_h: f32,
-    coords_y: f32,
+    clock_y: f32,
+    clock_h: f32,
+    heading_y: f32,
+    heading_h: f32,
+    coord_ys: [f32; 3],
     coord_h: f32,
-    coord_xs: [f32; 3],
-    coord_ws: [f32; 3],
     biome_y: f32,
     biome_h: f32,
+    fps_box_y: f32,
+    fps_box_h: f32,
     zoom_y: f32,
     zoom_h: f32,
     minus_x: f32,
@@ -202,8 +205,174 @@ struct MapRightLayout {
     readout_x: f32,
     readout_w: f32,
     plus_x: f32,
-    fps_box_y: f32,
-    fps_box_h: f32,
+}
+
+struct BiomeCardLayout {
+    icon_rect: Option<[f32; 4]>,
+    text_x: f32,
+    #[cfg_attr(not(test), allow(dead_code))]
+    avail_w: f32,
+    biome_lines: Vec<(String, f32, f32)>,
+    dim_line: Option<(String, f32, f32)>,
+}
+
+impl BiomeCardLayout {
+    fn truncate_measured(text: &str, max_w: f32, measure: &impl Fn(&str) -> f32) -> String {
+        if measure(text) <= max_w {
+            return text.to_owned();
+        }
+        let mut s = text.to_owned();
+        while !s.is_empty() && measure(&format!("{s}..")) > max_w {
+            s.pop();
+        }
+        if s.is_empty() {
+            String::new()
+        } else {
+            format!("{s}..")
+        }
+    }
+
+    fn fit_measured_line(
+        text: &str,
+        avail_w: f32,
+        min_scale: f32,
+        max_scale: f32,
+        measure: &impl Fn(&str) -> f32,
+    ) -> (String, f32) {
+        let raw_w = measure(text).max(1.0);
+        if raw_w * min_scale <= avail_w {
+            let scale = (avail_w / raw_w).clamp(min_scale, max_scale);
+            (text.to_owned(), scale)
+        } else {
+            let fitted = Self::truncate_measured(text, avail_w / min_scale, measure);
+            (fitted, min_scale)
+        }
+    }
+
+    fn split_two_lines<'a>(
+        text: &'a str,
+        measure: &impl Fn(&str) -> f32,
+    ) -> Option<(&'a str, &'a str)> {
+        let mut best: Option<(f32, &str, &str)> = None;
+        for (idx, ch) in text.char_indices() {
+            if ch != ' ' {
+                continue;
+            }
+            let left = text[..idx].trim();
+            let right = text[idx + 1..].trim();
+            if left.is_empty() || right.is_empty() {
+                continue;
+            }
+            let widest = measure(left).max(measure(right));
+            if best.is_none_or(|(bw, _, _)| widest < bw) {
+                best = Some((widest, left, right));
+            }
+        }
+        best.map(|(_, l, r)| (l, r))
+    }
+
+    fn compute(
+        rx: f32,
+        ry: f32,
+        rw: f32,
+        rh: f32,
+        biome_title: &str,
+        dim_name: &str,
+        measure: impl Fn(&str) -> f32,
+    ) -> Self {
+        let right_limit = rx + rw - 5.0;
+        if rh < 22.0 || rw < 64.0 {
+            let text_x = rx + 5.0;
+            let avail_w = (right_limit - text_x).max(8.0);
+            let max_b = (rh - 4.0).max(5.0) / 8.0;
+            let min_b = 0.50_f32.min(max_b);
+            let (b_str, b_scale) =
+                Self::fit_measured_line(biome_title, avail_w, min_b, max_b.min(0.76), &measure);
+            let y0 = ry + (rh - 8.0 * b_scale) * 0.5;
+            return Self {
+                icon_rect: None,
+                text_x,
+                avail_w,
+                biome_lines: vec![(b_str, y0, b_scale)],
+                dim_line: None,
+            };
+        }
+
+        let thumb_sz = (rh - 10.0).min(rw * 0.22).floor().clamp(12.0, 21.0);
+        let thumb_x = rx + 5.0;
+        let thumb_y = (ry + (rh - thumb_sz) * 0.5).floor();
+        let text_x = thumb_x + thumb_sz + 6.0;
+        let avail_w = (right_limit - text_x).max(8.0);
+        let icon_rect = Some([thumb_x, thumb_y, thumb_sz, thumb_sz]);
+
+        let raw_b = measure(biome_title).max(1.0);
+        let single_line_fits = raw_b * 0.70 <= avail_w;
+        if single_line_fits || rh < 28.0 || Self::split_two_lines(biome_title, &measure).is_none() {
+            let max_b = if rh >= 32.0 { 0.86 } else { 0.80 };
+            let max_d = if rh >= 32.0 { 0.74 } else { 0.68 };
+            let (mut b_str, mut b_scale) =
+                Self::fit_measured_line(biome_title, avail_w, 0.54, max_b, &measure);
+            let (mut d_str, mut d_scale) =
+                Self::fit_measured_line(dim_name, avail_w, 0.52, max_d, &measure);
+            let gap = if rh >= 32.0 { 3.0 } else { 2.2 };
+            let max_total = (rh - 5.0).max(12.0);
+            let text_avail = (max_total - gap).max(8.0);
+            let needed = 9.0 * b_scale + 8.0 * d_scale;
+            if needed > text_avail {
+                let k = text_avail / needed;
+                b_scale *= k;
+                d_scale *= k;
+                b_str = Self::truncate_measured(biome_title, avail_w / b_scale, &measure);
+                d_str = Self::truncate_measured(dim_name, avail_w / d_scale, &measure);
+            }
+            let b_cell = 9.0 * b_scale;
+            let d_cell = 8.0 * d_scale;
+            let total = b_cell + gap + d_cell;
+            let y0 = (ry + (rh - total) * 0.5).max(ry + 2.5);
+            let dy = y0 + b_cell + gap;
+            return Self {
+                icon_rect,
+                text_x,
+                avail_w,
+                biome_lines: vec![(b_str, y0, b_scale)],
+                dim_line: Some((d_str, dy, d_scale)),
+            };
+        }
+
+        let (part1, part2) = Self::split_two_lines(biome_title, &measure).unwrap();
+        let max_b = ((rh - 7.0) / 26.5).clamp(0.54, 0.72);
+        let widest = measure(part1).max(measure(part2)).max(1.0);
+        let mut b_scale = (avail_w / widest).min(max_b).clamp(0.50, max_b);
+        let max_d = (max_b * 0.92).clamp(0.50, 0.66);
+        let (mut d_str, mut d_scale) =
+            Self::fit_measured_line(dim_name, avail_w, 0.50, max_d, &measure);
+        let gap1 = 1.6_f32;
+        let gap2 = 2.2_f32;
+        let max_total = (rh - 5.0).max(16.0);
+        let text_avail = (max_total - gap1 - gap2).max(10.0);
+        let needed = 2.0 * 8.8 * b_scale + 8.0 * d_scale;
+        if needed > text_avail {
+            let k = text_avail / needed;
+            b_scale *= k;
+            d_scale *= k;
+            d_str = Self::truncate_measured(dim_name, avail_w / d_scale, &measure);
+        }
+        let s1 = Self::truncate_measured(part1, avail_w / b_scale, &measure);
+        let s2 = Self::truncate_measured(part2, avail_w / b_scale, &measure);
+        let b_cell = 8.8 * b_scale;
+        let d_cell = 8.0 * d_scale;
+        let total = 2.0 * b_cell + gap1 + gap2 + d_cell;
+        let y1 = (ry + (rh - total) * 0.5).max(ry + 2.5);
+        let y2 = y1 + b_cell + gap1;
+        let dy = y2 + b_cell + gap2;
+        Self {
+            icon_rect,
+            text_x,
+            avail_w,
+            biome_lines: vec![(s1, y1, b_scale), (s2, y2, b_scale)],
+            dim_line: Some((d_str, dy, d_scale)),
+        }
+    }
 }
 
 struct SettingsTabMetrics {
@@ -258,7 +427,15 @@ impl Game<'_> {
     }
 
     /// Draw vanilla Minecraft's sunken gray inventory slot (`#8B8B8B` fill, `#373737` top/left, `#FFFFFF` bottom/right).
-    fn draw_3ds_slot_rect(&self, batch: &mut HudBatch, x: f32, y: f32, w: f32, h: f32, highlight: bool) {
+    fn draw_3ds_slot_rect(
+        &self,
+        batch: &mut HudBatch,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        highlight: bool,
+    ) {
         let a = &self.gui.atlas;
         let bg = if highlight {
             rgba(0xA8, 0xA8, 0xA8, 0xFF)
@@ -297,8 +474,10 @@ impl Game<'_> {
             return;
         }
         if self.remote.is_some() {
-            let allow_offhand =
-                matches!(self.remote_menu().1.as_str(), "inventory" | "minecraft:inventory");
+            let allow_offhand = matches!(
+                self.remote_menu().1.as_str(),
+                "inventory" | "minecraft:inventory"
+            );
             for _ in 0..36 {
                 let Some(carried) = self.carried.clone() else {
                     break;
@@ -410,7 +589,16 @@ impl Game<'_> {
     }
 
     /// Draw a 1-2px outline rectangle around `(x, y, w, h)`.
-    fn draw_slot_outline(&self, batch: &mut HudBatch, x: f32, y: f32, w: f32, h: f32, t: f32, color: u32) {
+    fn draw_slot_outline(
+        &self,
+        batch: &mut HudBatch,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        t: f32,
+        color: u32,
+    ) {
         let a = &self.gui.atlas;
         batch.fill(a, x, y, w, t, color);
         batch.fill(a, x, y + h - t, w, t, color);
@@ -431,7 +619,12 @@ impl Game<'_> {
         let is_active = self.shulkds.dashboard.active_slot == Some(slot_idx);
 
         if is_active {
-            if self.gui.atlas.sprites.contains_key("legacy/hud/hotbar_selection") {
+            if self
+                .gui
+                .atlas
+                .sprites
+                .contains_key("legacy/hud/hotbar_selection")
+            {
                 batch.sprite_scaled(
                     &self.gui.atlas,
                     "legacy/hud/hotbar_selection",
@@ -517,23 +710,6 @@ impl Game<'_> {
         );
     }
 
-    /// Truncate text so it never overflows `max_w` pixels inside a banner.
-    fn truncate_text_to_width(&self, text: &str, max_w: f32) -> String {
-        let a = &self.gui.atlas;
-        if HudBatch::text_width(a, text) <= max_w {
-            return text.to_owned();
-        }
-        let mut s = text.to_owned();
-        while !s.is_empty() && HudBatch::text_width(a, &format!("{s}..")) > max_w {
-            s.pop();
-        }
-        if s.is_empty() {
-            String::new()
-        } else {
-            format!("{s}..")
-        }
-    }
-
     /// Draw an item stack centered inside a touch slot of `slot_size`, scaling cleanly to fit.
     fn draw_touch_slot_item(
         &self,
@@ -603,7 +779,11 @@ impl Game<'_> {
             let (bg, hi, sh) = if highlighted {
                 (LCE_BTN_HOVER, LCE_BTN_HOVER_HI, LCE_BTN_HOVER_SH)
             } else {
-                (LCE_BTN_BG, rgba(0xA4, 0xA4, 0xA4, 0xFF), rgba(0x4C, 0x4C, 0x4C, 0xFF))
+                (
+                    LCE_BTN_BG,
+                    rgba(0xA4, 0xA4, 0xA4, 0xFF),
+                    rgba(0x4C, 0x4C, 0x4C, 0xFF),
+                )
             };
             batch.fill(a, x, y, w, h, PANEL_BORDER);
             batch.fill(a, x + 1.0, y + 1.0, w - 2.0, h - 2.0, bg);
@@ -618,7 +798,11 @@ impl Game<'_> {
         let scale = fit_w.min(fit_h).min(max_scale).clamp(0.45, 1.0);
         let lx = x + ((w - lw * scale) * 0.5).max(2.0);
         let ly = y + ((h - 8.0 * scale) * 0.5);
-        let fg = if highlighted { rgba(0xFF, 0xFF, 0xA0, 0xFF) } else { TEXT_WHITE };
+        let fg = if highlighted {
+            rgba(0xFF, 0xFF, 0xA0, 0xFF)
+        } else {
+            TEXT_WHITE
+        };
         batch.text_scaled(a, label, lx, ly, scale, fg, true);
     }
 
@@ -740,15 +924,40 @@ impl Game<'_> {
                     "legacy/tiles/high_tab_middle"
                 };
                 if self.gui.atlas.sprites.contains_key(high_sprite) {
-                    nine_slice(batch, &self.gui.atlas, high_sprite, tx, lay.tab_y, tw, lay.tab_h + 4.0, u32::MAX);
+                    nine_slice(
+                        batch,
+                        &self.gui.atlas,
+                        high_sprite,
+                        tx,
+                        lay.tab_y,
+                        tw,
+                        lay.tab_h + 4.0,
+                        u32::MAX,
+                    );
                 } else {
-                    batch.fill(&self.gui.atlas, tx, lay.tab_y, tw, lay.tab_h + 3.0, PANEL_BG);
+                    batch.fill(
+                        &self.gui.atlas,
+                        tx,
+                        lay.tab_y,
+                        tw,
+                        lay.tab_h + 3.0,
+                        PANEL_BG,
+                    );
                 }
             } else {
                 let ty = lay.tab_y + 2.0;
                 let th = lay.tab_h - 1.0;
                 if self.gui.atlas.sprites.contains_key("legacy/tiles/low_tab") {
-                    nine_slice(batch, &self.gui.atlas, "legacy/tiles/low_tab", tx, ty, tw, th, u32::MAX);
+                    nine_slice(
+                        batch,
+                        &self.gui.atlas,
+                        "legacy/tiles/low_tab",
+                        tx,
+                        ty,
+                        tw,
+                        th,
+                        u32::MAX,
+                    );
                 } else {
                     batch.fill(&self.gui.atlas, tx, ty, tw, th, LCE_TAB_BACK);
                 }
@@ -814,11 +1023,25 @@ impl Game<'_> {
             let text_x = icon_x + icon_sz + gap;
             let vis_text_h = 7.0 * text_scale + shadow_w * 0.5;
             let text_y = (cy - vis_text_h * 0.5).round();
-            batch.text_scaled(&self.gui.atlas, label, text_x, text_y, text_scale, fg, !is_active);
+            batch.text_scaled(
+                &self.gui.atlas,
+                label,
+                text_x,
+                text_y,
+                text_scale,
+                fg,
+                !is_active,
+            );
         }
 
         // 4. Main Beveled Content Panel
-        self.draw_3ds_panel(batch, lay.content_x, lay.content_y, lay.content_w, lay.content_h);
+        self.draw_3ds_panel(
+            batch,
+            lay.content_x,
+            lay.content_y,
+            lay.content_w,
+            lay.content_h,
+        );
 
         let (inner_x, inner_y, inner_w, inner_h) = lay.inner_rect();
 
@@ -865,7 +1088,12 @@ impl Game<'_> {
                 .unwrap_or(false)
             {
                 let [fx, fy, fw, fh] = self.shulkds.dashboard.focus_rects[idx];
-                if self.gui.atlas.sprites.contains_key("legacy/hud/hotbar_selection") {
+                if self
+                    .gui
+                    .atlas
+                    .sprites
+                    .contains_key("legacy/hud/hotbar_selection")
+                {
                     batch.sprite_scaled(
                         &self.gui.atlas,
                         "legacy/hud/hotbar_selection",
@@ -899,7 +1127,14 @@ impl Game<'_> {
                 } else {
                     lay.content_y + lay.content_h - 15.0
                 };
-                batch.fill(&self.gui.atlas, tx - 4.0, ty - 2.0, tw + 8.0, 12.0, rgba(20, 20, 24, 215));
+                batch.fill(
+                    &self.gui.atlas,
+                    tx - 4.0,
+                    ty - 2.0,
+                    tw + 8.0,
+                    12.0,
+                    rgba(20, 20, 24, 215),
+                );
                 batch.text(&self.gui.atlas, msg, tx, ty, TEXT_WHITE, true);
             }
         }
@@ -927,14 +1162,27 @@ impl Game<'_> {
             let th = 8.0 * scale;
             let tx = (bx + (bw - tw) * 0.5).floor();
             let ty = (by + (bh - th) * 0.5).floor();
-            batch.text_scaled(&self.gui.atlas, pause_label, tx, ty, scale, TEXT_WHITE, true);
+            batch.text_scaled(
+                &self.gui.atlas,
+                pause_label,
+                tx,
+                ty,
+                scale,
+                TEXT_WHITE,
+                true,
+            );
         }
     }
 
     /// Persistent vanilla 9-slot Hotbar anchored at the bottom of the touch screen.
     fn draw_3ds_persistent_hotbar(&mut self, batch: &mut HudBatch, lay: &Bottom3dsLayout) {
         let s = lay.hotbar_scale;
-        if self.gui.atlas.sprites.contains_key("gui/sprites/hud/hotbar") {
+        if self
+            .gui
+            .atlas
+            .sprites
+            .contains_key("gui/sprites/hud/hotbar")
+        {
             batch.sprite_scaled(
                 &self.gui.atlas,
                 "gui/sprites/hud/hotbar",
@@ -945,7 +1193,13 @@ impl Game<'_> {
                 u32::MAX,
             );
         } else {
-            self.draw_3ds_panel(batch, lay.hotbar_x, lay.hotbar_y, lay.hotbar_w, lay.hotbar_h);
+            self.draw_3ds_panel(
+                batch,
+                lay.hotbar_x,
+                lay.hotbar_y,
+                lay.hotbar_w,
+                lay.hotbar_h,
+            );
         }
 
         // Persistent touch hotbar item slots
@@ -965,7 +1219,12 @@ impl Game<'_> {
         // Selection frame (Legacy4J `legacy:hud/hotbar_selection`) for held weapon/hotbar slot
         let sel_x = lay.hotbar_x - s + (self.selected as f32) * (20.0 * s);
         let sel_y = lay.hotbar_y - s;
-        let sel_sprite = if self.gui.atlas.sprites.contains_key("legacy/hud/hotbar_selection") {
+        let sel_sprite = if self
+            .gui
+            .atlas
+            .sprites
+            .contains_key("legacy/hud/hotbar_selection")
+        {
             "legacy/hud/hotbar_selection"
         } else {
             "gui/sprites/hud/hotbar_selection"
@@ -984,7 +1243,7 @@ impl Game<'_> {
     }
 
     fn map_tab_metrics(x: f32, y: f32, w: f32, h: f32) -> (f32, f32, f32, f32, f32) {
-        let map_size = (h - 4.0).min(w - 102.0).max(68.0);
+        let map_size = (h - 4.0).min(w - 116.0).max(68.0);
         let map_x = x + 4.0;
         let map_y = y + ((h - map_size) / 2.0).floor();
         let info_panel_x = map_x + map_size + 6.0;
@@ -995,44 +1254,55 @@ impl Game<'_> {
     fn map_right_layout(panel_x: f32, panel_y: f32, panel_w: f32, panel_h: f32) -> MapRightLayout {
         let rx = panel_x + 4.0;
         let rw = (panel_w - 8.0).max(52.0);
-        let ry0 = panel_y + 4.0;
-        let rh = (panel_h - 8.0).max(60.0);
+        let pad_y = if panel_h >= 176.0 { 4.0 } else { 3.0 };
+        let ry0 = panel_y + pad_y;
+        let rh = (panel_h - pad_y * 2.0).max(56.0);
+        let gap = if rh >= 178.0 {
+            3.0
+        } else if rh >= 146.0 {
+            2.0
+        } else {
+            1.0
+        };
+        let usable = (rh - 7.0 * gap).max(48.0);
+        let row_h = (usable / 8.75).floor().clamp(6.0, 20.0);
+        let biome_h = (usable - 7.0 * row_h).max(row_h);
 
-        let btn_h = if rh < 118.0 { 16.0 } else { 19.0 };
-        let zoom_h = btn_h;
-        let zoom_y = ry0 + rh - zoom_h;
-        let fps_box_h = btn_h;
-        let fps_box_y = zoom_y - 3.0 - fps_box_h;
+        let clock_y = ry0;
+        let clock_h = row_h;
+        let heading_y = clock_y + clock_h + gap;
+        let heading_h = row_h;
+        let coord_ys = [
+            heading_y + heading_h + gap,
+            heading_y + heading_h + gap + row_h + gap,
+            heading_y + heading_h + gap + (row_h + gap) * 2.0,
+        ];
+        let coord_h = row_h;
+        let biome_y = coord_ys[2] + coord_h + gap;
+        let fps_box_y = biome_y + biome_h + gap;
+        let fps_box_h = row_h;
+        let zoom_y = fps_box_y + fps_box_h + gap;
+        let zoom_h = row_h;
+
         let step_w = (rw * 0.24).floor().clamp(18.0, 26.0);
         let minus_x = rx;
         let readout_x = rx + step_w + 3.0;
         let readout_w = (rw - step_w * 2.0 - 6.0).max(24.0);
         let plus_x = rx + rw - step_w;
 
-        let top_avail = (fps_box_y - 3.0 - ry0).max(40.0);
-        let header_y = ry0;
-        let header_h = if top_avail < 86.0 { 16.0 } else { 20.0 };
-        let coords_y = header_y + header_h + 3.0;
-        let coord_h = if top_avail < 86.0 { 22.0 } else { 28.0 };
-        let coord_gap = 2.0;
-        let coord_w = ((rw - coord_gap * 2.0) / 3.0).floor().max(14.0);
-        let last_coord_w = (rw - (coord_w + coord_gap) * 2.0).max(coord_w);
-        let coord_xs = [rx, rx + coord_w + coord_gap, rx + (coord_w + coord_gap) * 2.0];
-        let coord_ws = [coord_w, coord_w, last_coord_w];
-        let biome_y = coords_y + coord_h + 3.0;
-        let biome_h = (fps_box_y - 3.0 - biome_y).max(16.0);
-
         MapRightLayout {
             rx,
             rw,
-            header_y,
-            header_h,
-            coords_y,
+            clock_y,
+            clock_h,
+            heading_y,
+            heading_h,
+            coord_ys,
             coord_h,
-            coord_xs,
-            coord_ws,
             biome_y,
             biome_h,
+            fps_box_y,
+            fps_box_h,
             zoom_y,
             zoom_h,
             minus_x,
@@ -1040,9 +1310,28 @@ impl Game<'_> {
             readout_x,
             readout_w,
             plus_x,
-            fps_box_y,
-            fps_box_h,
         }
+    }
+
+    fn clock_frame_index(day_time: i64) -> usize {
+        let ticks = day_time.rem_euclid(24_000);
+        (((ticks - 6_000).rem_euclid(24_000) as f32 / 24_000.0) * 64.0).round() as usize % 64
+    }
+
+    fn compass_heading_info(yaw: f32) -> (usize, &'static str) {
+        let y = yaw.rem_euclid(360.0);
+        let frame = ((y / 360.0) * 32.0).round() as usize % 32;
+        let name = match ((y + 22.5) / 45.0) as usize % 8 {
+            0 => "South",
+            1 => "Southwest",
+            2 => "West",
+            3 => "Northwest",
+            4 => "North",
+            5 => "Northeast",
+            6 => "East",
+            _ => "Southeast",
+        };
+        (frame, name)
     }
 
     /// Tab 1 (Default): Touch-Oriented Map + Modern Telemetry Cards & Controls.
@@ -1054,15 +1343,44 @@ impl Game<'_> {
         self.register_focus(map_x, map_y, map_size, map_size, None);
 
         // Left parchment minimap
-        self.draw_lce_content_panel(batch, map_x - 2.0, map_y - 2.0, map_size + 4.0, map_size + 4.0);
+        self.draw_lce_content_panel(
+            batch,
+            map_x - 2.0,
+            map_y - 2.0,
+            map_size + 4.0,
+            map_size + 4.0,
+        );
         if self.gui.atlas.sprites.contains_key("map/map_background") {
-            batch.sprite_scaled(&self.gui.atlas, "map/map_background", map_x, map_y, map_size, map_size, u32::MAX);
+            batch.sprite_scaled(
+                &self.gui.atlas,
+                "map/map_background",
+                map_x,
+                map_y,
+                map_size,
+                map_size,
+                u32::MAX,
+            );
         } else {
-            batch.fill(&self.gui.atlas, map_x, map_y, map_size, map_size, rgba(212, 190, 146, 255));
+            batch.fill(
+                &self.gui.atlas,
+                map_x,
+                map_y,
+                map_size,
+                map_size,
+                rgba(212, 190, 146, 255),
+            );
         }
 
         let pad = (map_size * 0.06).max(4.0);
         let inner = map_size - pad * 2.0;
+        batch.fill(
+            &self.gui.atlas,
+            map_x + pad - 1.0,
+            map_y + pad - 1.0,
+            inner + 2.0,
+            inner + 2.0,
+            rgba(30, 28, 24, 255),
+        );
         if self.gui.atlas.sprites.contains_key(MINIMAP_SPRITE) {
             batch.sprite_scaled(
                 &self.gui.atlas,
@@ -1074,20 +1392,62 @@ impl Game<'_> {
                 u32::MAX,
             );
         } else {
-            batch.fill(&self.gui.atlas, map_x + pad, map_y + pad, inner, inner, rgba(64, 92, 64, 255));
+            batch.fill(
+                &self.gui.atlas,
+                map_x + pad,
+                map_y + pad,
+                inner,
+                inner,
+                rgba(64, 92, 64, 255),
+            );
         }
 
         let cx = map_x + map_size / 2.0;
         let cy = map_y + map_size / 2.0;
-        batch.text(&self.gui.atlas, "N", cx - 3.0, map_y + pad + 2.0, TEXT_WHITE, true);
-        batch.text(&self.gui.atlas, "S", cx - 3.0, map_y + map_size - pad - 10.0, TEXT_WHITE, true);
-        batch.text(&self.gui.atlas, "W", map_x + pad + 2.0, cy - 4.0, TEXT_WHITE, true);
-        batch.text(&self.gui.atlas, "E", map_x + map_size - pad - 8.0, cy - 4.0, TEXT_WHITE, true);
+        batch.text(
+            &self.gui.atlas,
+            "N",
+            cx - 3.0,
+            map_y + pad + 2.0,
+            TEXT_WHITE,
+            true,
+        );
+        batch.text(
+            &self.gui.atlas,
+            "S",
+            cx - 3.0,
+            map_y + map_size - pad - 10.0,
+            TEXT_WHITE,
+            true,
+        );
+        batch.text(
+            &self.gui.atlas,
+            "W",
+            map_x + pad + 2.0,
+            cy - 4.0,
+            TEXT_WHITE,
+            true,
+        );
+        batch.text(
+            &self.gui.atlas,
+            "E",
+            map_x + map_size - pad - 8.0,
+            cy - 4.0,
+            TEXT_WHITE,
+            true,
+        );
 
-        if let Some(r) = self.gui.atlas.sprites.get("map/decorations/player").copied() {
+        if let Some(r) = self
+            .gui
+            .atlas
+            .sprites
+            .get("map/decorations/player")
+            .copied()
+        {
             let arrow = 180.0 + self.yaw;
             let (sin_a, cos_a) = (arrow + 180.0).to_radians().sin_cos();
-            let pt = |dx: f32, dy: f32| [cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a];
+            let pt =
+                |dx: f32, dy: f32| [cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a];
             let hs = 4.5;
             batch.quad(
                 [pt(-hs, hs), pt(hs, hs), pt(hs, -hs), pt(-hs, -hs)],
@@ -1096,191 +1456,194 @@ impl Game<'_> {
             );
         }
 
-        // Right-hand redesigned telemetry panel
+        // Right-hand redesigned 8-card telemetry column
         let panel_y = map_y - 2.0;
         let panel_h = map_size + 4.0;
         self.draw_lce_content_panel(batch, info_panel_x, panel_y, info_panel_w, panel_h);
         let rm = Self::map_right_layout(info_panel_x, panel_y, info_panel_w, panel_h);
 
-        // Card 1: Heading & Day Clock Strip
-        self.draw_slate_card(batch, rm.rx, rm.header_y, rm.rw, rm.header_h, None);
-        let yaw = self.yaw.rem_euclid(360.0);
-        let dir8 = match ((yaw + 22.5) / 45.0) as usize % 8 {
-            0 => "S",
-            1 => "SW",
-            2 => "W",
-            3 => "NW",
-            4 => "N",
-            5 => "NE",
-            6 => "E",
-            _ => "SE",
+        let icon_sz = (rm.clock_h - 5.0).clamp(9.0, 12.0);
+        let icon_x = rm.rx + 5.0;
+        let text_left = icon_x + icon_sz + 4.0;
+        let right_edge = rm.rx + rm.rw - 5.0;
+        let row_text_scale = if rm.clock_h < 15.0 { 0.72 } else { 0.85 };
+
+        // Card 1: Live Minecraft Clock + Day N | HH:MM
+        self.draw_slate_card(batch, rm.rx, rm.clock_y, rm.rw, rm.clock_h, None);
+        let clock_frame = format!(
+            "item/clock_{:02}",
+            Self::clock_frame_index(self.world.day_time)
+        );
+        let clock_sprite = if self.gui.atlas.sprites.contains_key(&clock_frame) {
+            Some(clock_frame.as_str())
+        } else if self.gui.atlas.sprites.contains_key("item/clock_00") {
+            Some("item/clock_00")
+        } else if self.gui.atlas.sprites.contains_key("item/clock") {
+            Some("item/clock")
+        } else {
+            None
         };
+        if let Some(sp) = clock_sprite {
+            batch.sprite_scaled(
+                &self.gui.atlas,
+                sp,
+                icon_x,
+                rm.clock_y + (rm.clock_h - icon_sz) * 0.5,
+                icon_sz,
+                icon_sz,
+                u32::MAX,
+            );
+        }
         let ticks = self.world.day_time.rem_euclid(24_000);
         let day = self.world.day_time.div_euclid(24_000);
-        let day_long = format!("DAY: {day}");
         let hour = ((ticks / 1000) + 6) % 24;
         let min = ((ticks % 1000) * 60) / 1000;
         let is_day = (6..18).contains(&hour);
+        let day_str = format!("Day {day}");
         let clock_str = format!("{hour:02}:{min:02}");
         let clock_col = if is_day {
             rgba(255, 214, 102, 255)
         } else {
             rgba(164, 188, 255, 255)
         };
-        let compass_key = if self.gui.atlas.sprites.contains_key("item/compass_16") {
+        let a = &self.gui.atlas;
+        let avail_clock_w = (right_edge - text_left).max(16.0);
+        let raw_day_w = (HudBatch::text_width(a, &day_str) - 1.0).max(1.0);
+        let raw_time_w = (HudBatch::text_width(a, &clock_str) - 1.0).max(1.0);
+        let min_sep = 7.0;
+        let clock_scale = ((avail_clock_w - min_sep) / (raw_day_w + raw_time_w))
+            .min(row_text_scale)
+            .clamp(0.48, row_text_scale);
+        let day_w = raw_day_w * clock_scale;
+        let time_w = raw_time_w * clock_scale;
+        let day_y = rm.clock_y + (rm.clock_h - 7.0 * clock_scale) * 0.5;
+        let clock_x = right_edge - time_w;
+        batch.text_scaled(
+            a,
+            &day_str,
+            text_left,
+            day_y,
+            clock_scale,
+            rgba(214, 220, 232, 255),
+            false,
+        );
+        let gap_start = text_left + day_w;
+        if clock_x - gap_start >= 4.0 {
+            let sep_x = ((gap_start + clock_x) * 0.5).floor();
+            let sep_h = (8.0 * clock_scale).round().max(5.0);
+            let sep_y = rm.clock_y + (rm.clock_h - sep_h) * 0.5;
+            batch.fill(a, sep_x, sep_y, 1.0, sep_h, rgba(126, 134, 148, 255));
+        }
+        batch.text_scaled(a, &clock_str, clock_x, day_y, clock_scale, clock_col, false);
+
+        // Card 2: Rotating Compass + Full Heading Name
+        self.draw_slate_card(batch, rm.rx, rm.heading_y, rm.rw, rm.heading_h, None);
+        let (compass_idx, heading_name) = Self::compass_heading_info(self.yaw);
+        let compass_frame = format!("item/compass_{compass_idx:02}");
+        let compass_sp = if self.gui.atlas.sprites.contains_key(&compass_frame) {
+            Some(compass_frame.as_str())
+        } else if self.gui.atlas.sprites.contains_key("item/compass_16") {
             Some("item/compass_16")
         } else if self.gui.atlas.sprites.contains_key("item/compass") {
             Some("item/compass")
         } else {
             None
         };
-        let dir_x = if let Some(compass_sp) = compass_key {
-            let cs = (rm.header_h - 6.0).clamp(10.0, 13.0);
+        if let Some(sp) = compass_sp {
             batch.sprite_scaled(
                 &self.gui.atlas,
-                compass_sp,
-                rm.rx + 6.0,
-                rm.header_y + (rm.header_h - cs) * 0.5,
-                cs,
-                cs,
+                sp,
+                icon_x,
+                rm.heading_y + (rm.heading_h - icon_sz) * 0.5,
+                icon_sz,
+                icon_sz,
                 u32::MAX,
             );
-            rm.rx + 6.0 + cs + 3.0
-        } else {
-            rm.rx + 7.0
-        };
-        let header_scale = if rm.header_h < 18.0 { 0.80 } else { 0.90 };
-        let hy = rm.header_y + (rm.header_h - 8.0 * header_scale) * 0.5;
-        batch.text_scaled(&self.gui.atlas, dir8, dir_x, hy, header_scale, TEXT_WHITE, false);
-        let cw = HudBatch::text_width(&self.gui.atlas, &clock_str) * header_scale;
-        let clock_x = rm.rx + rm.rw - cw - 5.0;
-        let dir_w = HudBatch::text_width(&self.gui.atlas, dir8) * header_scale;
-        let left_edge = dir_x + dir_w + 4.0;
-        let right_edge = clock_x - 4.0;
-        let avail_w = (right_edge - left_edge).max(0.0);
-        if avail_w >= 14.0 {
-            let day_str = if HudBatch::text_width(&self.gui.atlas, &day_long) * 0.68 > avail_w {
-                format!("D{day}")
-            } else {
-                day_long
-            };
-            let day_raw_w = HudBatch::text_width(&self.gui.atlas, &day_str).max(1.0);
-            let day_scale = (avail_w / day_raw_w)
-                .min(header_scale * 0.90)
-                .clamp(0.42, header_scale);
-            let day_w = day_raw_w * day_scale;
-            if day_w <= avail_w + 0.5 {
-                let day_x = left_edge + ((avail_w - day_w) * 0.5).max(0.0);
-                let day_y = rm.header_y + (rm.header_h - 8.0 * day_scale) * 0.5;
-                batch.text_scaled(
-                    &self.gui.atlas,
-                    &day_str,
-                    day_x,
-                    day_y,
-                    day_scale,
-                    rgba(206, 214, 228, 255),
-                    false,
-                );
-            }
         }
+        let a = &self.gui.atlas;
+        let heading_raw_w = (HudBatch::text_width(a, heading_name) - 1.0).max(1.0);
+        let heading_scale = ((right_edge - text_left).max(16.0) / heading_raw_w)
+            .min(row_text_scale)
+            .clamp(0.55, row_text_scale);
+        let heading_y = rm.heading_y + (rm.heading_h - 7.0 * heading_scale) * 0.5;
         batch.text_scaled(
-            &self.gui.atlas,
-            &clock_str,
-            clock_x,
-            hy,
-            header_scale,
-            clock_col,
+            a,
+            heading_name,
+            text_left,
+            heading_y,
+            heading_scale,
+            TEXT_WHITE,
             false,
         );
 
-        // Card 2: Three Color-Coded Coordinate Chips (X | Y | Z)
+        // Cards 3-5: Stacked Color-Accented X / Y / Z Rows
         let [px, py, pz] = self.player_position();
         let axes = [
             ("X", px.floor() as i32, rgba(255, 118, 118, 255)),
             ("Y", py.floor() as i32, rgba(116, 227, 138, 255)),
             ("Z", pz.floor() as i32, rgba(116, 192, 252, 255)),
         ];
-        for i in 0..3 {
-            let (axis, val, col) = axes[i];
-            let cx = rm.coord_xs[i];
-            let cw = rm.coord_ws[i];
-            self.draw_slate_card(batch, cx, rm.coords_y, cw, rm.coord_h, None);
+        for (i, (axis, val, col)) in axes.into_iter().enumerate() {
+            let cy = rm.coord_ys[i];
+            self.draw_slate_card(batch, rm.rx, cy, rm.rw, rm.coord_h, Some(col));
             let a = &self.gui.atlas;
-            batch.fill(a, cx + 1.0, rm.coords_y + 1.0, (cw - 2.0).max(0.0), 2.0, col);
+            let lbl_scale = (row_text_scale * 0.92).clamp(0.58, 0.82);
+            let lbl_x = rm.rx + 8.0;
+            let lbl_w = HudBatch::text_width(a, axis) * lbl_scale;
             let val_s = format!("{val}");
-            let lbl_scale = 0.72;
-            let lw = HudBatch::text_width(a, axis) * lbl_scale;
-            let vw_raw = HudBatch::text_width(a, &val_s).max(1.0);
-            let val_scale = ((cw - 6.0).max(10.0) / vw_raw).clamp(0.55, 0.95);
-            let vw = vw_raw * val_scale;
-            if rm.coord_h >= 26.0 {
-                batch.text_scaled(a, axis, cx + (cw - lw) * 0.5, rm.coords_y + 5.0, lbl_scale, col, false);
-                batch.text_scaled(a, &val_s, cx + (cw - vw) * 0.5, rm.coords_y + 15.0, val_scale, TEXT_WHITE, false);
-            } else {
-                let line = format!("{axis}{val_s}");
-                let ls = ((cw - 4.0).max(8.0) / HudBatch::text_width(a, &line).max(1.0)).clamp(0.52, 0.85);
-                let ltw = HudBatch::text_width(a, &line) * ls;
-                batch.text_scaled(a, &line, cx + (cw - ltw) * 0.5, rm.coords_y + (rm.coord_h - 8.0 * ls) * 0.5, ls, TEXT_WHITE, false);
-            }
+            let val_raw_w = (HudBatch::text_width(a, &val_s) - 1.0).max(1.0);
+            let avail_val_w = (right_edge - (lbl_x + lbl_w + 6.0)).max(16.0);
+            let val_scale = (avail_val_w / val_raw_w)
+                .min(row_text_scale)
+                .clamp(0.52, row_text_scale);
+            let vw = val_raw_w * val_scale;
+            let ly = cy + (rm.coord_h - 7.0 * lbl_scale) * 0.5;
+            let vy = cy + (rm.coord_h - 7.0 * val_scale) * 0.5;
+            batch.text_scaled(a, axis, lbl_x, ly, lbl_scale, col, false);
+            batch.text_scaled(a, &val_s, right_edge - vw, vy, val_scale, TEXT_WHITE, false);
         }
 
-        // Card 3: Biome & Dimension Badge
-        let biome = self.current_biome_name();
+        // Card 6: Dimension Diorama + Non-Overlapping Biome & Dimension Label
+        let (_, biome_title) = self.current_biome_id_and_name();
         let (dim_name, dim_col) = self.current_dimension_info();
-        self.draw_slate_card(batch, rm.rx, rm.biome_y, rm.rw, rm.biome_h, Some(dim_col));
-        let b_max_w = (rm.rw - 12.0).max(20.0);
-        let biome_fit = self.truncate_text_to_width(&biome, b_max_w);
-        if rm.biome_h >= 24.0 {
-            let total_text_h = 18.0;
-            let by0 = rm.biome_y + ((rm.biome_h - total_text_h) * 0.5).max(3.0);
-            batch.text_scaled(&self.gui.atlas, &biome_fit, rm.rx + 7.0, by0, 0.92, TEXT_WHITE, false);
-            batch.text_scaled(&self.gui.atlas, dim_name, rm.rx + 7.0, by0 + 10.0, 0.78, dim_col, false);
-        } else {
-            let by0 = rm.biome_y + (rm.biome_h - 7.0) * 0.5;
-            batch.text_scaled(&self.gui.atlas, &biome_fit, rm.rx + 7.0, by0, 0.82, TEXT_WHITE, false);
-        }
-
-        // Card 4: FPS Telemetry Badge + Zoom Controls (`-` | `[1x ••••]` | `+`)
-        self.draw_3ds_button_scaled(batch, rm.minus_x, rm.zoom_y, rm.step_w, rm.zoom_h, "-", false, 1.0);
-        self.draw_slate_card(batch, rm.readout_x, rm.zoom_y, rm.readout_w, rm.zoom_h, None);
-        self.register_focus_button(rm.readout_x, rm.zoom_y, rm.readout_w, rm.zoom_h);
-        let z_str = format!("{}x", self.shulkds.dashboard.map_zoom);
-        let z_scale = 0.88;
-        let zw = HudBatch::text_width(&self.gui.atlas, &z_str) * z_scale;
-        batch.text_scaled(
-            &self.gui.atlas,
-            &z_str,
-            rm.readout_x + (rm.readout_w - zw) * 0.5,
-            rm.zoom_y + (rm.zoom_h - 8.0 * z_scale) * 0.5 - 1.5,
-            z_scale,
-            TEXT_WHITE,
-            false,
+        let dim_id = self.dim.id();
+        self.draw_slate_card(batch, rm.rx, rm.biome_y, rm.rw, rm.biome_h, None);
+        let card = BiomeCardLayout::compute(
+            rm.rx,
+            rm.biome_y,
+            rm.rw,
+            rm.biome_h,
+            &biome_title,
+            dim_name,
+            |s| HudBatch::text_width(&self.gui.atlas, s),
         );
-        // 4 subtle zoom-tier pips along bottom of zoom readout
-        let tier = if self.shulkds.dashboard.map_zoom < 1.0 {
-            0usize
-        } else if self.shulkds.dashboard.map_zoom < 1.5 {
-            1
-        } else if self.shulkds.dashboard.map_zoom < 3.0 {
-            2
-        } else {
-            3
-        };
-        let pip_w = 4.0;
-        let pip_gap = 2.0;
-        let pips_w = 4.0 * pip_w + 3.0 * pip_gap;
-        let pip_x0 = rm.readout_x + (rm.readout_w - pips_w) * 0.5;
-        let pip_y = rm.zoom_y + rm.zoom_h - 4.0;
-        for p in 0..4 {
-            let pcol = if p == tier {
-                rgba(116, 227, 138, 255)
-            } else {
-                rgba(76, 84, 100, 255)
-            };
-            batch.fill(&self.gui.atlas, pip_x0 + p as f32 * (pip_w + pip_gap), pip_y, pip_w, 2.0, pcol);
+        if let Some([ix, iy, iw, _ih]) = card.icon_rect {
+            self.draw_dimension_thumbnail(batch, ix, iy, iw, dim_id, dim_col);
         }
-        self.draw_3ds_button_scaled(batch, rm.plus_x, rm.zoom_y, rm.step_w, rm.zoom_h, "+", false, 1.0);
+        for (line, ly, ls) in &card.biome_lines {
+            batch.text_scaled(
+                &self.gui.atlas,
+                line,
+                card.text_x,
+                *ly,
+                *ls,
+                TEXT_WHITE,
+                false,
+            );
+        }
+        if let Some((dim_txt, dy, ds)) = &card.dim_line {
+            batch.text_scaled(
+                &self.gui.atlas,
+                dim_txt,
+                card.text_x,
+                *dy,
+                *ds,
+                dim_col,
+                false,
+            );
+        }
 
+        // Card 7: FPS Telemetry Card
         let reading = self.frame_reading().0;
         let base_fps = if reading > 0 {
             reading
@@ -1300,10 +1663,14 @@ impl Game<'_> {
         } else {
             rgba(255, 118, 118, 255)
         };
-        self.draw_slate_card(batch, rm.rx, rm.fps_box_y, rm.rw, rm.fps_box_h, Some(fps_col));
-        let fps_scale = if rm.fps_box_h < 18.0 { 0.80 } else { 0.90 };
-        let fy = rm.fps_box_y + (rm.fps_box_h - 8.0 * fps_scale) * 0.5;
-        let fps_label = if fg_share.is_some() { "FPS (FG)" } else { "FPS" };
+        self.draw_slate_card(batch, rm.rx, rm.fps_box_y, rm.rw, rm.fps_box_h, None);
+        let fps_scale = row_text_scale;
+        let fy = rm.fps_box_y + (rm.fps_box_h - 7.0 * fps_scale) * 0.5;
+        let fps_label = if fg_share.is_some() {
+            "FPS (FG)"
+        } else {
+            "FPS"
+        };
         batch.text_scaled(
             &self.gui.atlas,
             fps_label,
@@ -1314,26 +1681,79 @@ impl Game<'_> {
             false,
         );
         let fps_val = format!("{fps}");
-        let fvw = HudBatch::text_width(&self.gui.atlas, &fps_val) * fps_scale;
+        let fvw = (HudBatch::text_width(&self.gui.atlas, &fps_val) - 1.0).max(1.0) * fps_scale;
         batch.text_scaled(
             &self.gui.atlas,
             &fps_val,
-            rm.rx + rm.rw - fvw - 6.0,
+            right_edge - fvw,
             fy,
             fps_scale,
             fps_col,
             false,
         );
+
+        // Card 8: Zoom Controls (`-` | `[2x ••••]` | `+`)
+        self.draw_3ds_button_scaled(
+            batch, rm.minus_x, rm.zoom_y, rm.step_w, rm.zoom_h, "-", false, 1.0,
+        );
+        self.draw_slate_card(
+            batch,
+            rm.readout_x,
+            rm.zoom_y,
+            rm.readout_w,
+            rm.zoom_h,
+            None,
+        );
+        self.register_focus_button(rm.readout_x, rm.zoom_y, rm.readout_w, rm.zoom_h);
+        let z_str = format!("{}x", self.shulkds.dashboard.map_zoom);
+        let z_scale = if rm.zoom_h < 15.0 { 0.72 } else { 0.85 };
+        let zw = (HudBatch::text_width(&self.gui.atlas, &z_str) - 1.0).max(1.0) * z_scale;
+        batch.text_scaled(
+            &self.gui.atlas,
+            &z_str,
+            rm.readout_x + (rm.readout_w - zw) * 0.5,
+            rm.zoom_y + (rm.zoom_h - 7.0 * z_scale) * 0.5 - 1.5,
+            z_scale,
+            TEXT_WHITE,
+            false,
+        );
+        // 4 subtle zoom-tier pips along bottom of zoom readout
+        let tier = if self.shulkds.dashboard.map_zoom < 1.0 {
+            0usize
+        } else if self.shulkds.dashboard.map_zoom < 1.5 {
+            1
+        } else if self.shulkds.dashboard.map_zoom < 3.0 {
+            2
+        } else {
+            3
+        };
+        let pip_w = 4.0;
+        let pip_gap = 2.0;
+        let pips_w = 4.0 * pip_w + 3.0 * pip_gap;
+        let pip_x0 = rm.readout_x + (rm.readout_w - pips_w) * 0.5;
+        let pip_y = rm.zoom_y + rm.zoom_h - 3.5;
+        for p in 0..4 {
+            let pcol = if p == tier {
+                rgba(116, 227, 138, 255)
+            } else {
+                rgba(76, 84, 100, 255)
+            };
+            batch.fill(
+                &self.gui.atlas,
+                pip_x0 + p as f32 * (pip_w + pip_gap),
+                pip_y,
+                pip_w,
+                1.5,
+                pcol,
+            );
+        }
+        self.draw_3ds_button_scaled(
+            batch, rm.plus_x, rm.zoom_y, rm.step_w, rm.zoom_h, "+", false, 1.0,
+        );
     }
 
     /// Geometry shared between draw and tap for the Concept-matched Dual-Screen Survival Inventory.
-    fn survival_inv_layout(
-        &self,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-    ) -> SurvivalInvLayout {
+    fn survival_inv_layout(&self, x: f32, y: f32, w: f32, h: f32) -> SurvivalInvLayout {
         let include_hotbar_row =
             self.settings.extras.shulkds_hotbar == HotbarPosition::TopScreenClassic;
         let grid_rows = if include_hotbar_row { 5.2 } else { 4.0 };
@@ -1476,7 +1896,14 @@ impl Game<'_> {
         batch.fill(a, ix, iy + 1.0, 1.0, top_half, mid_top);
         batch.fill(a, ix + iw - 1.0, iy + 1.0, 1.0, top_half, mid_top);
         batch.fill(a, ix, iy + 1.0 + top_half, 1.0, bot_half, mid_bot);
-        batch.fill(a, ix + iw - 1.0, iy + 1.0 + top_half, 1.0, bot_half, mid_bot);
+        batch.fill(
+            a,
+            ix + iw - 1.0,
+            iy + 1.0 + top_half,
+            1.0,
+            bot_half,
+            mid_bot,
+        );
     }
 
     fn selected_inventory_item_display(&mut self) -> (String, u32) {
@@ -1491,9 +1918,8 @@ impl Game<'_> {
             };
             s
         };
-        let name = horizon_client::item_tooltip::name_line(stack, &|key| {
-            self.pack.names.display_get(key)
-        });
+        let name =
+            horizon_client::item_tooltip::name_line(stack, &|key| self.pack.names.display_get(key));
         let default_rarity = self.item_rarity(&stack.item);
         let rarity = horizon_client::item_tooltip::rarity(stack, &default_rarity);
         let color = match rarity {
@@ -1564,22 +1990,31 @@ impl Game<'_> {
             batch.fill(a, px, py, 1.0, ph, dark);
             batch.fill(a, px, py + ph - 1.0, pw, 1.0, light);
             batch.fill(a, px + pw - 1.0, py, 1.0, ph, light);
-            batch.fill(a, px + 1.0, py + 1.0, pw - 2.0, ph - 2.0, rgba(0, 0, 0, 255));
+            batch.fill(
+                a,
+                px + 1.0,
+                py + 1.0,
+                pw - 2.0,
+                ph - 2.0,
+                rgba(0, 0, 0, 255),
+            );
         }
         let player_scale = (m.player_h * 0.36).min(m.player_w * 0.75).clamp(18.0, 38.0);
         let target_slot = self.shulkds.dashboard.active_slot.unwrap_or(self.selected);
         let target_center = match target_slot {
-            0..=8 => if m.include_hotbar_row {
-                (
-                    m.bag_x0 + (target_slot as f32 + 0.5) * m.slot_size,
-                    m.hotbar_row_y + 0.5 * m.slot_size,
-                )
-            } else {
-                (
-                    lay.hotbar_x + (11.0 + target_slot as f32 * 20.0) * lay.hotbar_scale,
-                    lay.hotbar_y + 11.0 * lay.hotbar_scale,
-                )
-            },
+            0..=8 => {
+                if m.include_hotbar_row {
+                    (
+                        m.bag_x0 + (target_slot as f32 + 0.5) * m.slot_size,
+                        m.hotbar_row_y + 0.5 * m.slot_size,
+                    )
+                } else {
+                    (
+                        lay.hotbar_x + (11.0 + target_slot as f32 * 20.0) * lay.hotbar_scale,
+                        lay.hotbar_y + 11.0 * lay.hotbar_scale,
+                    )
+                }
+            }
             9..=35 => {
                 let idx = target_slot - 9;
                 let row = idx / 9;
@@ -1696,16 +2131,40 @@ impl Game<'_> {
                 let slot_idx = 9 + (row * 9 + col);
                 let sx = gx + (col as f32 * col_step);
                 let sy = gy + (row as f32 * row_step);
-                self.draw_3ds_interactive_slot_rect(batch, slot_idx, sx, sy, slot_w, slot_h, false, None);
+                self.draw_3ds_interactive_slot_rect(
+                    batch, slot_idx, sx, sy, slot_w, slot_h, false, None,
+                );
             }
         }
     }
 
-    fn draw_slate_card(&self, batch: &mut HudBatch, x: f32, y: f32, w: f32, h: f32, left_accent: Option<u32>) {
+    fn draw_slate_card(
+        &self,
+        batch: &mut HudBatch,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        left_accent: Option<u32>,
+    ) {
         let a = &self.gui.atlas;
         batch.fill(a, x, y, w, h, rgba(18, 18, 20, 255));
-        batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), (h - 2.0).max(0.0), rgba(36, 36, 38, 238));
-        batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), 1.0, rgba(72, 72, 76, 255));
+        batch.fill(
+            a,
+            x + 1.0,
+            y + 1.0,
+            (w - 2.0).max(0.0),
+            (h - 2.0).max(0.0),
+            rgba(36, 36, 38, 238),
+        );
+        batch.fill(
+            a,
+            x + 1.0,
+            y + 1.0,
+            (w - 2.0).max(0.0),
+            1.0,
+            rgba(72, 72, 76, 255),
+        );
         if let Some(col) = left_accent {
             batch.fill(a, x + 1.0, y + 1.0, 3.0, (h - 2.0).max(0.0), col);
         }
@@ -1721,7 +2180,11 @@ impl Game<'_> {
 
         let row_x = x + 2.0;
         let row_w = (w - 4.0).max(60.0);
-        let rows_y0 = if show_header { y + header_h + 4.0 } else { y + 1.0 };
+        let rows_y0 = if show_header {
+            y + header_h + 4.0
+        } else {
+            y + 1.0
+        };
         let avail_h = (y + h - rows_y0 - 2.0).max(74.0);
         let row_step = (avail_h / 7.0).floor().clamp(10.0, 22.0);
         let row_h = (row_step - 2.0).max(9.0);
@@ -1740,7 +2203,9 @@ impl Game<'_> {
         let perf_y = rows_y0 + 4.0 * row_step + 1.0;
         let toggle_y = rows_y0 + 5.0 * row_step + 1.0;
         let hud_y = rows_y0 + 6.0 * row_step + 1.0;
-        let toggle_h = (row_step - 2.0).clamp(10.0, 20.0).min((y + h - hud_y - 1.0).max(10.0));
+        let toggle_h = (row_step - 2.0)
+            .clamp(10.0, 20.0)
+            .min((y + h - hud_y - 1.0).max(10.0));
         let gap = 4.0;
         let reach_w = ((row_w - gap) * 0.5).floor();
         let reach_x = row_x;
@@ -1802,18 +2267,26 @@ impl Game<'_> {
                 let raw = (30.0 + t * 80.0).round();
                 let stepped = (raw / 5.0).round() * 5.0;
                 self.settings.fov = stepped.clamp(30.0, 110.0);
-                self.shulkds.dashboard.set_status(format!("FOV: {}", self.settings.fov as i32));
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("FOV: {}", self.settings.fov as i32));
             }
             2 => {
                 self.settings.gamma = (t * 10.0).round() / 10.0;
                 if let Some(r) = self.renderer.as_mut() {
                     r.gamma = self.settings.gamma;
                 }
-                self.shulkds.dashboard.set_status(format!("Brightness: {}%", (self.settings.gamma * 100.0).round() as i32));
+                self.shulkds.dashboard.set_status(format!(
+                    "Brightness: {}%",
+                    (self.settings.gamma * 100.0).round() as i32
+                ));
             }
             _ => {
                 self.settings.master_volume = (t * 10.0).round() / 10.0;
-                self.shulkds.dashboard.set_status(format!("Volume: {}%", (self.settings.master_volume * 100.0).round() as i32));
+                self.shulkds.dashboard.set_status(format!(
+                    "Volume: {}%",
+                    (self.settings.master_volume * 100.0).round() as i32
+                ));
             }
         }
     }
@@ -1823,7 +2296,12 @@ impl Game<'_> {
         let m = Self::settings_tab_metrics(x, y, w, h);
         if m.show_header {
             let icon_sz = 12.0;
-            self.draw_3ds_options_icon(batch, m.row_x + 2.0, m.header_y + (m.header_h - icon_sz) * 0.5, icon_sz);
+            self.draw_3ds_options_icon(
+                batch,
+                m.row_x + 2.0,
+                m.header_y + (m.header_h - icon_sz) * 0.5,
+                icon_sz,
+            );
             batch.text(
                 &self.gui.atlas,
                 "Quick Options",
@@ -1884,22 +2362,50 @@ impl Game<'_> {
             let gy = ry + (m.row_h - groove_h) * 0.5;
             let a = &self.gui.atlas;
             batch.fill(a, m.track_x, gy, m.track_w, groove_h, rgba(18, 18, 20, 255));
-            batch.fill(a, m.track_x + 1.0, gy + 1.0, (m.track_w - 2.0).max(0.0), (groove_h - 2.0).max(0.0), rgba(28, 28, 30, 255));
+            batch.fill(
+                a,
+                m.track_x + 1.0,
+                gy + 1.0,
+                (m.track_w - 2.0).max(0.0),
+                (groove_h - 2.0).max(0.0),
+                rgba(28, 28, 30, 255),
+            );
             let inner_tw = (m.track_w - 2.0).max(2.0);
             let fill_w = (inner_tw * norms[i]).round();
             if fill_w > 0.0 {
-                batch.fill(a, m.track_x + 1.0, gy + 1.0, fill_w, (groove_h - 2.0).max(0.0), rgba(96, 186, 96, 255));
+                batch.fill(
+                    a,
+                    m.track_x + 1.0,
+                    gy + 1.0,
+                    fill_w,
+                    (groove_h - 2.0).max(0.0),
+                    rgba(96, 186, 96, 255),
+                );
             }
             let kx = m.track_x + ((m.track_w - knob_w).max(0.0) * norms[i]).round();
             let ky = ry + (m.row_h - knob_h) * 0.5;
             batch.fill(a, kx, ky, knob_w, knob_h, rgba(18, 18, 20, 255));
-            batch.fill(a, kx + 1.0, ky + 1.0, knob_w - 2.0, (knob_h - 2.0).max(0.0), rgba(242, 244, 248, 255));
+            batch.fill(
+                a,
+                kx + 1.0,
+                ky + 1.0,
+                knob_w - 2.0,
+                (knob_h - 2.0).max(0.0),
+                rgba(242, 244, 248, 255),
+            );
 
             // Right-aligned dark value pill
             let vy = by;
             let vh = btn_h;
             batch.fill(a, m.val_x, vy, m.val_w, vh, rgba(68, 68, 72, 255));
-            batch.fill(a, m.val_x + 1.0, vy + 1.0, (m.val_w - 2.0).max(0.0), (vh - 2.0).max(0.0), rgba(24, 24, 26, 255));
+            batch.fill(
+                a,
+                m.val_x + 1.0,
+                vy + 1.0,
+                (m.val_w - 2.0).max(0.0),
+                (vh - 2.0).max(0.0),
+                rgba(24, 24, 26, 255),
+            );
             let vw_raw = HudBatch::text_width(a, &values[i]).max(1.0);
             let vs = ((m.val_w - 4.0).max(8.0) / vw_raw)
                 .min((vh - 2.0).max(6.0) / 8.0)
@@ -1933,14 +2439,7 @@ impl Game<'_> {
             "Frame Gen: OFF"
         };
         self.draw_3ds_button_scaled(
-            batch,
-            m.cam_x,
-            m.perf_y,
-            m.cam_w,
-            m.toggle_h,
-            fg_lbl,
-            fg_on,
-            0.88,
+            batch, m.cam_x, m.perf_y, m.cam_w, m.toggle_h, fg_lbl, fg_on, 0.88,
         );
 
         // Bottom 2-column Toggles: Reach-Around & Camera
@@ -1976,15 +2475,27 @@ impl Game<'_> {
         );
 
         let hotbar_pos = self.settings.extras.shulkds_hotbar;
-        let hotbar_lbl = format!("Hotbar: {}", hotbar_pos.short_label());
+        let hotbar_lbl = format!("Hotbar: {}", hotbar_pos.compact_label());
         self.draw_3ds_button_scaled(
             batch,
-            m.row_x,
+            m.reach_x,
             m.hud_y,
-            m.row_w,
+            m.reach_w,
             m.toggle_h,
             &hotbar_lbl,
             hotbar_pos != HotbarPosition::BottomScreenBottom,
+            0.88,
+        );
+        let lid_sleep = self.settings.extras.shulkds_lid_sleep;
+        let lid_lbl = format!("Lid Sleep: {}", lid_sleep.compact_label());
+        self.draw_3ds_button_scaled(
+            batch,
+            m.cam_x,
+            m.hud_y,
+            m.cam_w,
+            m.toggle_h,
+            &lid_lbl,
+            lid_sleep != LidSleepMode::Off,
             0.88,
         );
     }
@@ -2047,21 +2558,32 @@ impl Game<'_> {
                 u8::from(self.settings.controller.reach_around),
                 self.camera_type as u8,
                 self.settings.extras.shulkds_hotbar as u8,
+                self.settings.extras.shulkds_lid_sleep as u8,
                 u8::from(self.settings.extras.shulkds_classic_crafting),
                 u8::from(self.settings.extras.shulkds_classic_inventory),
             ],
         );
+        mix_bytes(&mut h, self.dim.id().as_bytes());
         mix_bytes(&mut h, &self.shulkds_update_sig().to_le_bytes());
         mix_opt_stack(&mut h, self.carried.as_ref());
         mix_bytes(
             &mut h,
             &(self.shulkds.dashboard.active_slot.unwrap_or(usize::MAX) as u64).to_le_bytes(),
         );
-        mix_bytes(&mut h, &self.shulkds.dashboard.map_zoom.to_bits().to_le_bytes());
+        mix_bytes(
+            &mut h,
+            &self.shulkds.dashboard.map_zoom.to_bits().to_le_bytes(),
+        );
         mix_bytes(&mut h, &self.settings.render_distance.to_le_bytes());
         mix_bytes(&mut h, &self.settings.fov.to_bits().to_le_bytes());
-        mix_bytes(&mut h, &((self.settings.gamma * 100.0).round() as i32).to_le_bytes());
-        mix_bytes(&mut h, &((self.settings.master_volume * 100.0).round() as i32).to_le_bytes());
+        mix_bytes(
+            &mut h,
+            &((self.settings.gamma * 100.0).round() as i32).to_le_bytes(),
+        );
+        mix_bytes(
+            &mut h,
+            &((self.settings.master_volume * 100.0).round() as i32).to_le_bytes(),
+        );
         if let Some(status) = self.shulkds.dashboard.current_status() {
             mix_bytes(&mut h, status.as_bytes());
         }
@@ -2081,6 +2603,8 @@ impl Game<'_> {
         }
         let mut telemetry_sig: u64 = 0xcbf2_9ce4_8422_2325;
         if self.shulkds.dashboard.active_tab == DashboardTab::Minimap {
+            let biome_id = self.current_biome_id_and_name().0;
+            mix_bytes(&mut h, &biome_id.to_le_bytes());
             let [px, py, pz] = self.player_position();
             mix_bytes(
                 &mut telemetry_sig,
@@ -2098,22 +2622,22 @@ impl Game<'_> {
             mix_bytes(&mut telemetry_sig, &self.frame_reading().0.to_le_bytes());
             mix_bytes(
                 &mut telemetry_sig,
-                &(self.world.day_time / 1000).to_le_bytes(),
+                &(self.world.day_time / 16).to_le_bytes(),
             );
         }
         let now = Instant::now();
         let touch_active = self.shulkds.dashboard.pointer_down
             || self.shulkds_title.pointer_down
-            || self
-                .shulkds
-                .dashboard
-                .last_bottom_touch
-                .is_some_and(|t| now.saturating_duration_since(t) < std::time::Duration::from_millis(250));
+            || self.shulkds.dashboard.last_bottom_touch.is_some_and(|t| {
+                now.saturating_duration_since(t) < std::time::Duration::from_millis(250)
+            });
         let elapsed = self
             .shulkds
             .dashboard
             .last_bottom_present
-            .map_or(std::time::Duration::MAX, |t| now.saturating_duration_since(t));
+            .map_or(std::time::Duration::MAX, |t| {
+                now.saturating_duration_since(t)
+            });
         let should_present = touch_active
             || h != self.shulkds.dashboard.last_bottom_sig
             || (self.title.is_some() && elapsed >= std::time::Duration::from_millis(33))
@@ -2149,6 +2673,9 @@ impl Game<'_> {
             return;
         }
         if self.is_shulkds_paused() {
+            if matches!(action, BottomPointerAction::Down { .. }) {
+                self.dismiss_soft_keyboard();
+            }
             self.shulkds.dashboard.pointer_down = false;
             self.shulkds.dashboard.active_slider = None;
             self.shulkds.dashboard.drag_slot = None;
@@ -2170,6 +2697,7 @@ impl Game<'_> {
 
         match action {
             BottomPointerAction::Down { button } => {
+                self.dismiss_soft_keyboard();
                 self.shulkds.dashboard.bottom_focus = false;
                 self.shulkds.dashboard.pointer_down = true;
                 let had_carried = self.carried.is_some();
@@ -2183,7 +2711,9 @@ impl Game<'_> {
             BottomPointerAction::Move => {
                 if self.shulkds.dashboard.pointer_down
                     && let Some(active) = self.shulkds.dashboard.active_slider.clone()
-                    && let Some(idx) = active.strip_prefix("slider_").and_then(|s| s.parse::<usize>().ok())
+                    && let Some(idx) = active
+                        .strip_prefix("slider_")
+                        .and_then(|s| s.parse::<usize>().ok())
                 {
                     let lay = self.bottom_3ds_layout(0.0, 0.0, rect.width, rect.height);
                     let (ix, iy, iw, ih) = lay.inner_rect();
@@ -2276,9 +2806,16 @@ impl Game<'_> {
 
         match self.shulkds.dashboard.active_tab {
             DashboardTab::Minimap => self.handle_map_tab_tap(lx, ly, ix, iy, iw, ih),
-            DashboardTab::Inventory => {
-                self.handle_survival_inventory_tap(lx, ly, ix, iy, iw, ih, right_click, self.creative)
-            }
+            DashboardTab::Inventory => self.handle_survival_inventory_tap(
+                lx,
+                ly,
+                ix,
+                iy,
+                iw,
+                ih,
+                right_click,
+                self.creative,
+            ),
             DashboardTab::Settings => self.handle_settings_tab_tap(lx, ly, ix, iy, iw, ih),
         }
     }
@@ -2427,10 +2964,7 @@ impl Game<'_> {
         }
 
         // 6. Hotbar row inside Inv tab when Classic Top Hotbar is active
-        if m.include_hotbar_row
-            && ly >= m.hotbar_row_y
-            && ly <= m.hotbar_row_y + m.slot_size
-        {
+        if m.include_hotbar_row && ly >= m.hotbar_row_y && ly <= m.hotbar_row_y + m.slot_size {
             for col in 0..9 {
                 let sx = m.bag_x0 + col as f32 * m.slot_size;
                 if lx >= sx && lx <= sx + m.slot_size {
@@ -2468,7 +3002,12 @@ impl Game<'_> {
     }
 
     /// Slot interaction: supports touch Quick-Move mode, double-tap Quick-Move, and server sync.
-    fn handle_slot_click_interact(&mut self, slot_idx: usize, right_click: bool, mut quick_move: bool) {
+    fn handle_slot_click_interact(
+        &mut self,
+        slot_idx: usize,
+        right_click: bool,
+        mut quick_move: bool,
+    ) {
         self.select_dashboard_slot(slot_idx);
         let now = Instant::now();
         let is_double_tap = !right_click
@@ -2476,7 +3015,9 @@ impl Game<'_> {
                 .shulkds
                 .dashboard
                 .last_tap_slot
-                .is_some_and(|(prev_slot, at)| prev_slot == slot_idx && at.elapsed().as_millis() < 380);
+                .is_some_and(|(prev_slot, at)| {
+                    prev_slot == slot_idx && at.elapsed().as_millis() < 380
+                });
         if self.shulkds.dashboard.quick_move_mode && self.carried.is_none() && !right_click {
             quick_move = true;
         } else if is_double_tap && self.carried.is_some() {
@@ -2485,7 +3026,11 @@ impl Game<'_> {
         } else if is_double_tap {
             quick_move = true;
         }
-        self.shulkds.dashboard.last_tap_slot = if is_double_tap { None } else { Some((slot_idx, now)) };
+        self.shulkds.dashboard.last_tap_slot = if is_double_tap {
+            None
+        } else {
+            Some((slot_idx, now))
+        };
 
         let input = if quick_move || self.has_shift_down() {
             horizon_client::menu::Input::QuickMove
@@ -2564,10 +3109,16 @@ impl Game<'_> {
             if ly >= ry && ly <= ry + m.row_h {
                 if lx >= m.minus_x && lx <= m.minus_x + m.step_btn_w {
                     match i {
-                        0 => self.settings.render_distance = (self.settings.render_distance - 2).max(2),
+                        0 => {
+                            self.settings.render_distance =
+                                (self.settings.render_distance - 2).max(2)
+                        }
                         1 => self.settings.fov = (self.settings.fov - 5.0).clamp(30.0, 110.0),
                         2 => self.settings.gamma = (self.settings.gamma - 0.1).max(0.0),
-                        _ => self.settings.master_volume = (self.settings.master_volume - 0.1).max(0.0),
+                        _ => {
+                            self.settings.master_volume =
+                                (self.settings.master_volume - 0.1).max(0.0)
+                        }
                     }
                     self.apply_settings_slider_norm(i, self.settings_slider_norms()[i]);
                     self.audio.play_button_click();
@@ -2582,10 +3133,16 @@ impl Game<'_> {
                 }
                 if lx >= m.plus_x && lx <= m.plus_x + m.step_btn_w {
                     match i {
-                        0 => self.settings.render_distance = (self.settings.render_distance + 2).min(32),
+                        0 => {
+                            self.settings.render_distance =
+                                (self.settings.render_distance + 2).min(32)
+                        }
                         1 => self.settings.fov = (self.settings.fov + 5.0).clamp(30.0, 110.0),
                         2 => self.settings.gamma = (self.settings.gamma + 0.1).min(1.0),
-                        _ => self.settings.master_volume = (self.settings.master_volume + 0.1).min(1.0),
+                        _ => {
+                            self.settings.master_volume =
+                                (self.settings.master_volume + 0.1).min(1.0)
+                        }
                     }
                     self.apply_settings_slider_norm(i, self.settings_slider_norms()[i]);
                     self.audio.play_button_click();
@@ -2624,7 +3181,9 @@ impl Game<'_> {
                 self.apply_ui_settings();
                 self.settings.save(&Self::options_path());
                 let lbl = self.settings.horizon.frame_generation.label();
-                self.shulkds.dashboard.set_status(format!("Frame Gen: {lbl}"));
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Frame Gen: {lbl}"));
                 self.audio.play_button_click();
                 return;
             }
@@ -2633,8 +3192,14 @@ impl Game<'_> {
         if ly >= m.toggle_y && ly <= m.toggle_y + m.toggle_h {
             if lx >= m.reach_x && lx <= m.reach_x + m.reach_w {
                 self.settings.controller.reach_around = !self.settings.controller.reach_around;
-                let state = if self.settings.controller.reach_around { "ON" } else { "OFF" };
-                self.shulkds.dashboard.set_status(format!("Reach-Around: {state}"));
+                let state = if self.settings.controller.reach_around {
+                    "ON"
+                } else {
+                    "OFF"
+                };
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Reach-Around: {state}"));
                 self.audio.play_button_click();
                 return;
             }
@@ -2651,15 +3216,28 @@ impl Game<'_> {
             }
         }
 
-        if ly >= m.hud_y && ly <= m.hud_y + m.toggle_h && lx >= m.row_x && lx <= m.row_x + m.row_w
-        {
-            let next = self.settings.extras.shulkds_hotbar.cycle(false);
-            self.settings.extras.shulkds_hotbar = next;
-            self.settings.save(&Self::options_path());
-            self.shulkds
-                .dashboard
-                .set_status(format!("Hotbar: {}", next.short_label()));
-            self.audio.play_button_click();
+        if ly >= m.hud_y && ly <= m.hud_y + m.toggle_h {
+            if lx >= m.reach_x && lx <= m.reach_x + m.reach_w {
+                let next = self.settings.extras.shulkds_hotbar.cycle(false);
+                self.settings.extras.shulkds_hotbar = next;
+                self.settings.save(&Self::options_path());
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Hotbar: {}", next.short_label()));
+                self.audio.play_button_click();
+                return;
+            }
+            if lx >= m.cam_x && lx <= m.cam_x + m.cam_w {
+                let next = self.settings.extras.shulkds_lid_sleep.cycle(false);
+                self.settings.extras.shulkds_lid_sleep = next;
+                self.settings.save(&Self::options_path());
+                self.sync_platform_lid_sleep_pref();
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Lid Sleep: {}", next.short_label()));
+                self.audio.play_button_click();
+                return;
+            }
         }
     }
 
@@ -2694,7 +3272,9 @@ impl Game<'_> {
                         self.handle_slot_click_interact(dest, true, false);
                     }
                 }
-                self.shulkds.dashboard.set_status(format!("Split {to_place} items"));
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Split {to_place} items"));
             }
         } else if let Some(slot_idx) = self
             .shulkds
@@ -2742,7 +3322,11 @@ impl Game<'_> {
                 .unwrap_or(self.selected);
             if self.slot_view(slot_idx).is_some() {
                 if self.remote.is_some() {
-                    let _ = self.remote_menu_ops(&[(Some(slot_idx), 1, horizon_client::menu::Input::Throw)]);
+                    let _ = self.remote_menu_ops(&[(
+                        Some(slot_idx),
+                        1,
+                        horizon_client::menu::Input::Throw,
+                    )]);
                 } else {
                     *self.slot_mut(slot_idx) = None;
                 }
@@ -2757,7 +3341,9 @@ impl Game<'_> {
             *slot = None;
         }
         self.send_creative_slots();
-        self.shulkds.dashboard.set_status("Cleared backpack (hotbar kept)");
+        self.shulkds
+            .dashboard
+            .set_status("Cleared backpack (hotbar kept)");
     }
 
     /// Quick-Sort Action: sorts items in player inventory (slots 9..36).
@@ -2771,12 +3357,17 @@ impl Game<'_> {
                 let Some((_, want_item)) = desired.get(target_idx - 9) else {
                     break;
                 };
-                if self.inventory[target_idx].as_ref().is_some_and(|s| s.item == *want_item) {
+                if self.inventory[target_idx]
+                    .as_ref()
+                    .is_some_and(|s| s.item == *want_item)
+                {
                     continue;
                 }
-                let Some(src_idx) = ((target_idx + 1)..36)
-                    .find(|&j| self.inventory[j].as_ref().is_some_and(|s| s.item == *want_item))
-                else {
+                let Some(src_idx) = ((target_idx + 1)..36).find(|&j| {
+                    self.inventory[j]
+                        .as_ref()
+                        .is_some_and(|s| s.item == *want_item)
+                }) else {
                     continue;
                 };
                 let mut ops = vec![
@@ -2801,13 +3392,19 @@ impl Game<'_> {
         let mut consolidated: Vec<ItemStack> = Vec::new();
         for item in items {
             let max_stack = 64;
-            if let Some(existing) = consolidated.iter_mut().find(|s| s.item == item.item && s.count < max_stack) {
+            if let Some(existing) = consolidated
+                .iter_mut()
+                .find(|s| s.item == item.item && s.count < max_stack)
+            {
                 let space = max_stack - existing.count;
                 let add = space.min(item.count);
                 existing.count += add;
                 let remainder = item.count - add;
                 if remainder > 0 {
-                    consolidated.push(ItemStack { count: remainder, ..item });
+                    consolidated.push(ItemStack {
+                        count: remainder,
+                        ..item
+                    });
                 }
             } else {
                 consolidated.push(item);
@@ -2881,9 +3478,11 @@ impl Game<'_> {
         }
         // Also equip a shield into offhand (504) if offhand is currently empty
         if self.offhand.is_none()
-            && let Some(sh_idx) = (9..36)
-                .chain(0..9)
-                .find(|&i| self.inventory[i].as_ref().is_some_and(|s| &*s.item == "minecraft:shield"))
+            && let Some(sh_idx) = (9..36).chain(0..9).find(|&i| {
+                self.inventory[i]
+                    .as_ref()
+                    .is_some_and(|s| &*s.item == "minecraft:shield")
+            })
         {
             if self.remote.is_some() {
                 if self.creative {
@@ -2902,7 +3501,9 @@ impl Game<'_> {
             }
         }
 
-        self.shulkds.dashboard.set_status(format!("Auto-Equipped {equipped_count} pieces"));
+        self.shulkds
+            .dashboard
+            .set_status(format!("Auto-Equipped {equipped_count} pieces"));
     }
 
     /// One-tap Craft 1 directly into inventory (or held cursor if full).
@@ -2916,15 +3517,23 @@ impl Game<'_> {
                 })
                 .or_else(|| (0..36).find(|&i| self.inventory[i].is_none()));
             if self.remote.is_some() {
-                if let Some(d) = dest && self.carried.is_none() {
+                if let Some(d) = dest
+                    && self.carried.is_none()
+                {
                     let _ = self.remote_menu_ops(&[
                         (Some(200), 0, horizon_client::menu::Input::Pickup),
                         (Some(d), 0, horizon_client::menu::Input::Pickup),
                     ]);
                 } else {
-                    let _ = self.remote_menu_ops(&[(Some(200), 0, horizon_client::menu::Input::Pickup)]);
+                    let _ = self.remote_menu_ops(&[(
+                        Some(200),
+                        0,
+                        horizon_client::menu::Input::Pickup,
+                    )]);
                 }
-                self.shulkds.dashboard.set_status(format!("Crafted x{}", result.count));
+                self.shulkds
+                    .dashboard
+                    .set_status(format!("Crafted x{}", result.count));
                 return;
             }
             if let Some(d) = dest {
@@ -2969,35 +3578,87 @@ impl Game<'_> {
         self.shulkds.dashboard.set_status("Crafted Max");
     }
 
-    fn current_biome_name(&self) -> String {
+    fn format_biome_slug(raw: &str) -> String {
+        raw.split('_')
+            .filter(|w| !w.is_empty())
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    Some(first) => {
+                        format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn current_biome_id_and_name(&self) -> (u16, String) {
         let [px, py, pz] = self.player_position();
         let (bx, by, bz) = (px.floor() as i32, py.floor() as i32, pz.floor() as i32);
-        let chunk_coord = (bx >> 4, bz >> 4);
-        if let Some(c) = self.world.chunks.get(&chunk_coord) {
-            let biome_id = c.biome(bx, by, bz);
-            if let Some(biomes) = &self.world_biomes {
-                let raw = biomes
-                    .get(biome_id)
-                    .name
-                    .strip_prefix("minecraft:")
-                    .unwrap_or(&biomes.get(biome_id).name);
-                return raw
-                    .split('_')
-                    .filter(|w| !w.is_empty())
-                    .map(|w| {
-                        let mut chars = w.chars();
-                        match chars.next() {
-                            Some(first) => {
-                                format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
-                            }
-                            None => String::new(),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
+        if let Some(chunk) = self.world.chunks.get(&(bx >> 4, bz >> 4)) {
+            let biome_id = chunk.biome(bx, by, bz);
+            let biomes = world_biomes!(self);
+            if let Some(entry) = biomes.list.get(usize::from(biome_id)) {
+                let full = entry.name.as_str();
+                let (ns, slug) = full.split_once(':').unwrap_or(("minecraft", full));
+                let key = format!("biome.{ns}.{slug}");
+                let title = self
+                    .pack
+                    .names
+                    .display_get(&key)
+                    .filter(|s| !s.is_empty() && s != &key)
+                    .unwrap_or_else(|| Self::format_biome_slug(slug));
+                return (biome_id, title);
             }
         }
-        "Plains".to_string()
+        let fallback = match self.dim.id() {
+            "minecraft:the_nether" => "Nether Wastes",
+            "minecraft:the_end" => "The End",
+            _ => "Plains",
+        };
+        (u16::MAX, fallback.to_owned())
+    }
+
+    fn draw_dimension_thumbnail(
+        &self,
+        batch: &mut HudBatch,
+        x: f32,
+        y: f32,
+        size: f32,
+        dim_id: &str,
+        dim_col: u32,
+    ) {
+        let a = &self.gui.atlas;
+        batch.fill(
+            a,
+            x - 1.0,
+            y - 1.0,
+            size + 2.0,
+            size + 2.0,
+            rgba(16, 16, 18, 255),
+        );
+        batch.fill(a, x, y + size, size + 1.0, 1.0, rgba(68, 70, 76, 255));
+        batch.fill(a, x + size, y, 1.0, size, rgba(68, 70, 76, 255));
+
+        let sprite = match dim_id {
+            "minecraft:the_nether" => "shulkds/dim_nether",
+            "minecraft:the_end" => "shulkds/dim_end",
+            _ => "shulkds/dim_overworld",
+        };
+        if a.sprites.contains_key(sprite) {
+            batch.sprite_scaled(a, sprite, x, y, size, size, u32::MAX);
+        } else {
+            let sky_col = match dim_id {
+                "minecraft:the_nether" => rgba(56, 18, 20, 255),
+                "minecraft:the_end" => rgba(22, 14, 38, 255),
+                _ => rgba(0x72, 0xA4, 0xFE, 255),
+            };
+            let ground_h = (size * 0.28).floor().max(2.0);
+            batch.fill(a, x, y, size, size - ground_h, sky_col);
+            batch.fill(a, x, y + size - ground_h, size, ground_h, dim_col);
+        }
     }
 
     fn current_dimension_info(&self) -> (&'static str, u32) {
@@ -3047,9 +3708,9 @@ impl Game<'_> {
     }
 
     pub(super) fn shulkds_gui_scale(&self) -> f32 {
-        self.renderer
-            .as_ref()
-            .map_or(1.0, |r| HudBatch::new([r.config.width, r.config.height]).scale)
+        self.renderer.as_ref().map_or(1.0, |r| {
+            HudBatch::new([r.config.width, r.config.height]).scale
+        })
     }
 
     pub(super) fn shulkds_gui_layout(&self) -> horizon_client::dual_screen::DualScreenLayout {
@@ -3085,9 +3746,16 @@ impl Game<'_> {
             let top = &self.shulkds.layout.top_viewport;
             (top.x, top.y, top.width.max(1.0), top.height.max(1.0))
         } else {
-            self.renderer.as_ref().map_or((0.0, 0.0, 1280.0, 720.0), |r| {
-                (0.0, 0.0, r.config.width.max(1) as f32, r.config.height.max(1) as f32)
-            })
+            self.renderer
+                .as_ref()
+                .map_or((0.0, 0.0, 1280.0, 720.0), |r| {
+                    (
+                        0.0,
+                        0.0,
+                        r.config.width.max(1) as f32,
+                        r.config.height.max(1) as f32,
+                    )
+                })
         };
         let (req_w, req_h) = if self.title.is_some() {
             (340.0, 224.0)
@@ -3231,7 +3899,12 @@ impl Game<'_> {
                 .as_ref()
                 .map_or([1280, 720], |r| [r.config.width, r.config.height]);
             let s = batch_scale.max(1.0);
-            (0.0, 0.0, (size[0] as f32 / s).ceil(), (size[1] as f32 / s).ceil())
+            (
+                0.0,
+                0.0,
+                (size[0] as f32 / s).ceil(),
+                (size[1] as f32 / s).ceil(),
+            )
         }
     }
 
@@ -3305,7 +3978,8 @@ fn local_chrono_hm() -> (u8, u8) {
 }
 
 fn cached_device_hud_status() -> CachedDeviceHud {
-    static CACHE: std::sync::Mutex<Option<(Instant, CachedDeviceHud)>> = std::sync::Mutex::new(None);
+    static CACHE: std::sync::Mutex<Option<(Instant, CachedDeviceHud)>> =
+        std::sync::Mutex::new(None);
     let mut guard = CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -3340,8 +4014,8 @@ fn cached_device_hud_status() -> CachedDeviceHud {
     #[cfg(not(target_os = "android"))]
     let fresh = {
         let (hour, minute) = local_chrono_hm();
-        let battery = horizon_client::dual_screen_android::read_linux_sysfs_battery()
-            .unwrap_or((100, false));
+        let battery =
+            horizon_client::dual_screen_android::read_linux_sysfs_battery().unwrap_or((100, false));
         CachedDeviceHud {
             battery: Some(battery),
             use_24h: false,
@@ -3407,10 +4081,7 @@ impl Game<'_> {
         let Some((pct, charging)) = status.battery else {
             return;
         };
-        let bx = (rect.x
-            + rect.width
-            - 4.0
-            - horizon_client::dual_screen_android::BATTERY_SHELL_W)
+        let bx = (rect.x + rect.width - 4.0 - horizon_client::dual_screen_android::BATTERY_SHELL_W)
             .floor();
         let by = if top_aligned {
             (lay.hotbar_y
@@ -3418,10 +4089,7 @@ impl Game<'_> {
                 .floor()
                 .max(rect.y + 2.0)
         } else {
-            (rect.y
-                + rect.height
-                - 4.0
-                - horizon_client::dual_screen_android::BATTERY_SHELL_H)
+            (rect.y + rect.height - 4.0 - horizon_client::dual_screen_android::BATTERY_SHELL_H)
                 .floor()
         };
         let grid = horizon_client::dual_screen_android::battery_pixel_grid(pct, charging);
@@ -3431,20 +4099,14 @@ impl Game<'_> {
                 rgba(74, 214, 118, HUD_ALPHA),
             )
         } else if pct > 50 {
-            (
-                rgba(144, 244, 148, HUD_ALPHA),
-                rgba(84, 212, 92, HUD_ALPHA),
-            )
+            (rgba(144, 244, 148, HUD_ALPHA), rgba(84, 212, 92, HUD_ALPHA))
         } else if pct > 20 {
             (
                 rgba(255, 228, 124, HUD_ALPHA),
                 rgba(242, 192, 64, HUD_ALPHA),
             )
         } else {
-            (
-                rgba(255, 128, 128, HUD_ALPHA),
-                rgba(232, 72, 72, HUD_ALPHA),
-            )
+            (rgba(255, 128, 128, HUD_ALPHA), rgba(232, 72, 72, HUD_ALPHA))
         };
         let color_for = |px| match px {
             horizon_client::dual_screen_android::BatteryPixel::Empty => None,
@@ -3545,15 +4207,16 @@ impl Game<'_> {
         }
         if let Some(mut comp) = self.secondary_compositor.take() {
             let sec_size = comp.size();
-            let loading_sig = 0x5348_554c_4b5f_4c44_u64
-                ^ (u64::from(sec_size[0]) << 32)
-                ^ u64::from(sec_size[1]);
+            let loading_sig =
+                0x5348_554c_4b5f_4c44_u64 ^ (u64::from(sec_size[0]) << 32) ^ u64::from(sec_size[1]);
             let now = Instant::now();
             let elapsed = self
                 .shulkds
                 .dashboard
                 .last_bottom_present
-                .map_or(std::time::Duration::MAX, |t| now.saturating_duration_since(t));
+                .map_or(std::time::Duration::MAX, |t| {
+                    now.saturating_duration_since(t)
+                });
             if self.shulkds.dashboard.last_bottom_sig != loading_sig
                 || elapsed >= std::time::Duration::from_millis(500)
             {
@@ -3617,5 +4280,204 @@ mod classic_carried_tests {
             false,
             DashboardTab::Minimap
         ));
+    }
+
+    #[test]
+    fn map_right_layout_fits_non_overlapping_across_presets() {
+        let cases = [
+            (320.0_f32, 240.0_f32, HotbarPosition::BottomScreenBottom),
+            (310.0_f32, 270.0_f32, HotbarPosition::BottomScreenBottom),
+            (320.0_f32, 240.0_f32, HotbarPosition::TopScreenClassic),
+            (240.0_f32, 160.0_f32, HotbarPosition::BottomScreenBottom),
+        ];
+        for (bw, bh, hotbar) in cases {
+            let lay = Bottom3dsLayout::compute(0.0, 0.0, bw, bh, hotbar);
+            let (ix, iy, iw, ih) = lay.inner_rect();
+            let (_, map_y, map_size, info_x, info_w) = Game::map_tab_metrics(ix, iy, iw, ih);
+            let panel_y = map_y - 2.0;
+            let panel_h = map_size + 4.0;
+            let rm = Game::map_right_layout(info_x, panel_y, info_w, panel_h);
+
+            assert!(rm.rx >= info_x);
+            assert!(rm.rx + rm.rw <= info_x + info_w);
+            assert!(rm.clock_y >= panel_y);
+            assert!(rm.clock_y + rm.clock_h <= rm.heading_y);
+            assert!(rm.heading_y + rm.heading_h <= rm.coord_ys[0]);
+            assert!(rm.coord_ys[0] + rm.coord_h <= rm.coord_ys[1]);
+            assert!(rm.coord_ys[1] + rm.coord_h <= rm.coord_ys[2]);
+            assert!(rm.coord_ys[2] + rm.coord_h <= rm.biome_y);
+            assert!(rm.biome_y + rm.biome_h <= rm.fps_box_y);
+            assert!(rm.fps_box_y + rm.fps_box_h <= rm.zoom_y);
+            assert!(rm.zoom_y + rm.zoom_h <= panel_y + panel_h);
+            assert!(rm.biome_h >= 20.0);
+        }
+    }
+
+    #[test]
+    fn clock_frame_index_matches_vanilla_solar_cycle() {
+        assert_eq!(Game::clock_frame_index(6_000), 0);
+        assert_eq!(Game::clock_frame_index(12_000), 16);
+        assert_eq!(Game::clock_frame_index(18_000), 32);
+        assert_eq!(Game::clock_frame_index(0), 48);
+        assert_eq!(Game::clock_frame_index(30_000), 0);
+    }
+
+    #[test]
+    fn compass_heading_info_matches_cardinals_and_intercardinals() {
+        assert_eq!(Game::compass_heading_info(0.0), (0, "South"));
+        assert_eq!(Game::compass_heading_info(45.0), (4, "Southwest"));
+        assert_eq!(Game::compass_heading_info(90.0), (8, "West"));
+        assert_eq!(Game::compass_heading_info(180.0), (16, "North"));
+        assert_eq!(Game::compass_heading_info(225.0), (20, "Northeast"));
+        assert_eq!(Game::compass_heading_info(270.0), (24, "East"));
+        assert_eq!(Game::compass_heading_info(-90.0), (24, "East"));
+    }
+
+    #[test]
+    fn biome_card_layout_never_overlaps_across_all_biomes_and_presets() {
+        fn mc_width(s: &str) -> f32 {
+            s.chars()
+                .map(|c| match c {
+                    'i' | 'l' | '!' | '.' | ',' | ':' | ';' | '\'' | '|' => 2.0,
+                    'I' | 't' | ' ' => 4.0,
+                    'f' | 'k' | '(' | ')' | '{' | '}' | '[' | ']' => 5.0,
+                    _ => 6.0,
+                })
+                .sum()
+        }
+        fn fixed6_width(s: &str) -> f32 {
+            (s.chars().count() as f32) * 6.0
+        }
+
+        let biomes = [
+            "Plains",
+            "Sunflower Plains",
+            "Snowy Plains",
+            "Ice Spikes",
+            "Desert",
+            "Swamp",
+            "Mangrove Swamp",
+            "Forest",
+            "Flower Forest",
+            "Birch Forest",
+            "Dark Forest",
+            "Pale Garden",
+            "Old Growth Birch Forest",
+            "Old Growth Pine Taiga",
+            "Old Growth Spruce Taiga",
+            "Taiga",
+            "Snowy Taiga",
+            "Savanna",
+            "Savanna Plateau",
+            "Windswept Hills",
+            "Windswept Gravelly Hills",
+            "Windswept Forest",
+            "Windswept Savanna",
+            "Jungle",
+            "Sparse Jungle",
+            "Bamboo Jungle",
+            "Badlands",
+            "Eroded Badlands",
+            "Wooded Badlands",
+            "Meadow",
+            "Cherry Grove",
+            "Grove",
+            "Snowy Slopes",
+            "Frozen Peaks",
+            "Jagged Peaks",
+            "Stony Peaks",
+            "River",
+            "Frozen River",
+            "Beach",
+            "Snowy Beach",
+            "Stony Shore",
+            "Warm Ocean",
+            "Lukewarm Ocean",
+            "Deep Lukewarm Ocean",
+            "Ocean",
+            "Deep Ocean",
+            "Cold Ocean",
+            "Deep Cold Ocean",
+            "Frozen Ocean",
+            "Deep Frozen Ocean",
+            "Mushroom Fields",
+            "Dripstone Caves",
+            "Lush Caves",
+            "Deep Dark",
+            "Nether Wastes",
+            "Warped Forest",
+            "Crimson Forest",
+            "Soul Sand Valley",
+            "Basalt Deltas",
+            "The End",
+            "End Highlands",
+            "End Midlands",
+            "Small End Islands",
+            "End Barrens",
+            "The Void",
+            "Dappled Forest",
+            "Sparse Cherry Grove",
+            // Extreme modded single-word and multi-word stress cases
+            "Supercalifragilisticexpialidocious",
+            "Ancient Enchanted Crystal Caverns Valley",
+        ];
+        let dims = ["Overworld", "The Nether", "The End"];
+        let presets = [
+            (320.0_f32, 240.0_f32, HotbarPosition::BottomScreenBottom),
+            (310.0_f32, 270.0_f32, HotbarPosition::BottomScreenBottom),
+            (320.0_f32, 240.0_f32, HotbarPosition::TopScreenClassic),
+            (240.0_f32, 160.0_f32, HotbarPosition::BottomScreenBottom),
+        ];
+        for (bw, bh, hotbar) in presets {
+            let lay = Bottom3dsLayout::compute(0.0, 0.0, bw, bh, hotbar);
+            let (ix, iy, iw, ih) = lay.inner_rect();
+            let (_, map_y, map_size, info_x, info_w) = Game::map_tab_metrics(ix, iy, iw, ih);
+            let rm = Game::map_right_layout(info_x, map_y - 2.0, info_w, map_size + 4.0);
+            for biome in biomes {
+                for dim in dims {
+                    for measure in [mc_width as fn(&str) -> f32, fixed6_width as fn(&str) -> f32] {
+                        let card = BiomeCardLayout::compute(
+                            rm.rx, rm.biome_y, rm.rw, rm.biome_h, biome, dim, measure,
+                        );
+                        if let Some([tx, ty, tw, th]) = card.icon_rect {
+                            assert!(tx - 1.0 >= rm.rx + 2.0);
+                            assert!(ty - 1.0 >= rm.biome_y + 2.0);
+                            assert!(ty + th + 1.0 <= rm.biome_y + rm.biome_h - 2.0);
+                            assert!(tx + tw + 1.0 <= card.text_x - 3.0);
+                        }
+                        let mut lines: Vec<(String, f32, f32)> = card.biome_lines.clone();
+                        if let Some(d) = card.dim_line.clone() {
+                            lines.push(d);
+                        }
+                        assert!(!lines.is_empty());
+                        for (txt, ly, ls) in &lines {
+                            let rw = measure(txt) * ls;
+                            assert!(rw <= card.avail_w + 0.05, "{biome}/{dim} {txt} w={rw}");
+                            assert!(
+                                card.text_x + rw <= rm.rx + rm.rw - 4.5,
+                                "{biome}/{dim} right clip"
+                            );
+                            assert!(*ly >= rm.biome_y + 2.0, "{biome}/{dim} top clip ly={ly}");
+                            assert!(
+                                ly + 8.0 * ls <= rm.biome_y + rm.biome_h - 2.0,
+                                "{biome}/{dim} bottom clip"
+                            );
+                        }
+                        for pair in lines.windows(2) {
+                            let (_, ya, sa) = &pair[0];
+                            let (_, yb, _) = &pair[1];
+                            assert!(
+                                *yb >= *ya + 8.5 * *sa + 1.2,
+                                "{biome}/{dim} descender overlap ya={ya} sa={sa} yb={yb}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            Game::format_biome_slug("windswept_gravelly_hills"),
+            "Windswept Gravelly Hills"
+        );
     }
 }

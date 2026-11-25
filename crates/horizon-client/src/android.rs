@@ -515,17 +515,25 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The on-screen keyboard's height in window pixels, from StarlingActivity's insets listener.
-static IME_HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The on-screen keyboard's height in window pixels across primary and secondary displays.
+static PRIMARY_IME_HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static SECONDARY_IME_HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// `StarlingActivity.onImeHeight` (packaging/android/java), called on the UI thread.
 pub fn set_ime_height(pixels: i32) {
-    IME_HEIGHT.store(pixels.max(0) as u32, std::sync::atomic::Ordering::Relaxed);
+    PRIMARY_IME_HEIGHT.store(pixels.max(0) as u32, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// How far the on-screen keyboard covers the window from the bottom, in pixels.
+/// `SecondaryDisplay.onSecondaryImeHeight` (packaging/android/java), called on the UI thread.
+pub fn set_secondary_ime_height(pixels: i32) {
+    SECONDARY_IME_HEIGHT.store(pixels.max(0) as u32, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How far the on-screen keyboard covers the active window from the bottom, in pixels.
 pub fn ime_height() -> u32 {
-    IME_HEIGHT.load(std::sync::atomic::Ordering::Relaxed)
+    PRIMARY_IME_HEIGHT
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .max(SECONDARY_IME_HEIGHT.load(std::sync::atomic::Ordering::Relaxed))
 }
 
 /// Start or stop listening to the gyroscope (StarlingActivity.gyroscope); false when the phone
@@ -582,6 +590,8 @@ pub enum MirrorEvent {
     Action,
     /// A key for the game: Android's KEYCODE_*.
     Key(i32),
+    /// The user or presentation window dismissed the keyboard directly.
+    Dismissed,
 }
 
 /// The editor's events, from the UI thread, until the game's next frame.
@@ -621,6 +631,11 @@ pub fn mirror_action() {
 /// `TextMirror.onMirrorKey`, called on the UI thread.
 pub fn mirror_key(code: i32) {
     mirror_event(MirrorEvent::Key(code));
+}
+
+/// `TextMirror.onMirrorDismissed`, called on the UI thread.
+pub fn mirror_dismissed() {
+    mirror_event(MirrorEvent::Dismissed);
 }
 
 /// The text field in the keyboard's editor: shown, focused and the keyboard up
@@ -751,6 +766,12 @@ mod input {
             KeyAction::Up => false,
             _ => return None,
         };
+        if crate::dual_screen_android::is_clamshell_sleeping() && down {
+            if pad::pad_key(source, code).is_some() {
+                return Some(InputStatus::Handled);
+            }
+            return None;
+        }
         if let Some(button) = pad::pad_key(source, code) {
             let mut pads = PADS.lock().unwrap_or_else(|e| e.into_inner());
             pads.key(key.device_id(), button, down);
@@ -765,6 +786,12 @@ mod input {
 
     fn motion_input(motion: &MotionEvent<'_>) -> Option<InputStatus> {
         let source: u32 = motion.source().into();
+        if crate::dual_screen_android::is_clamshell_sleeping() {
+            if pad::joystick(source) || (source & (SOURCE_MOUSE | SOURCE_MOUSE_RELATIVE)) != 0 {
+                return Some(InputStatus::Handled);
+            }
+            return None;
+        }
         if pad::joystick(source) {
             if motion.pointer_count() > 0 {
                 let pointer = motion.pointer_at_index(0);
@@ -859,9 +886,21 @@ mod input {
     pub fn keyboard_used() -> bool {
         KEYBOARD_USED.swap(false, Ordering::Relaxed)
     }
+
+    pub(super) fn clear_for_sleep() {
+        *PADS.lock().unwrap_or_else(|e| e.into_inner()) = AndroidPads::new();
+        let mut mouse = MOUSE.lock().unwrap_or_else(|e| e.into_inner());
+        mouse.events.clear();
+        mouse.buttons = 0;
+        KEYBOARD_USED.store(false, Ordering::Relaxed);
+    }
 }
 
 pub use input::{MouseEvent, keyboard_used, pad_state, take_mouse_events};
+
+pub fn release_all_inputs() {
+    input::clear_for_sleep();
+}
 
 /// Android took the captured pointer back while the game held it (StarlingActivity).
 static POINTER_LOST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1283,6 +1322,22 @@ pub fn frame_hint(cpu: std::time::Duration, fps_limit: i32, display_fps_cap: i32
     });
 }
 
+/// Release any active ADPF boost session when entering low-power clamshell sleep.
+pub fn suspend_frame_hint() {
+    let close = frame_hints().close;
+    HINT_STATE.with_borrow_mut(|state| {
+        if state.session != 0 {
+            if let Some(close) = close {
+                // SAFETY: closes the session previously returned by `create` on this thread.
+                unsafe { close(state.session) };
+            }
+            state.session = 0;
+            state.target_ns = 0;
+        }
+        state.last_heavy = None;
+    });
+}
+
 /// Whether `android_main` ran in this process already: a second run ends the process
 /// (see [`main`]).
 static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1566,4 +1621,28 @@ pub fn on_secondary_touch(
 /// Called from `SecondaryDisplay.onImeActive` on Android's UI thread.
 pub fn on_secondary_ime_active(active: bool) {
     crate::dual_screen_android::set_secondary_ime_active(active);
+}
+
+/// Called from `StarlingActivity.onClamshellHingeAngle` on Android's UI thread.
+pub fn on_clamshell_hinge_angle(degrees: f32) {
+    crate::dual_screen_android::update_hinge_angle(degrees);
+}
+
+/// Called from `StarlingActivity.onScreenPowerChanged` on Android's UI thread.
+pub fn on_screen_power_changed(interactive: bool) {
+    crate::dual_screen_android::update_screen_power(interactive);
+}
+
+/// Sync the `Lid Sleep Mode` preference down to both Rust and `StarlingActivity`.
+pub fn set_lid_sleep_enabled(enabled: bool) {
+    crate::dual_screen_android::set_lid_sleep_enabled(enabled);
+    with_activity(|env, activity| {
+        env.call_method(
+            activity,
+            "setLidSleepEnabled",
+            "(Z)V",
+            &[jni::objects::JValue::Bool(u8::from(enabled))],
+        )
+        .map(drop)
+    });
 }

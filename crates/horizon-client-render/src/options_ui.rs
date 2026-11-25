@@ -3505,18 +3505,18 @@ impl OptionsUi {
                     self.extra_button(s, crate::extras::Item::ShulkdsClassicInventory),
                     Some(self.extra_button(s, crate::extras::Item::ShulkdsAutoUpdates)),
                 ));
-                if cfg!(target_os = "android") {
-                    rows.push(Row::Buttons(
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::ShulkdsLidSleep),
+                    cfg!(target_os = "android").then(|| {
                         button(
                             0.0,
                             0.0,
                             150.0,
                             tr("horizon.shulkds.check_updates"),
                             Act::CheckUpdates,
-                        ),
-                        None,
-                    ));
-                }
+                        )
+                    }),
+                ));
                 rows
             }
             Page::Agent => {

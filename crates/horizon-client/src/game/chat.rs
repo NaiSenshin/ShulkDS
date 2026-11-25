@@ -726,6 +726,7 @@ impl Game<'_> {
         self.ui.chat_screen = None;
         self.ui.chat.reset_scroll();
         if self.screen == Screen::Chat {
+            self.dismiss_soft_keyboard();
             self.screen = Screen::Playing;
             self.capture(true);
         }

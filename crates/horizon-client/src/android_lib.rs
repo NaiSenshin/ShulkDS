@@ -89,6 +89,15 @@ extern "system" fn Java_io_github_juanluci_starling_TextMirror_onMirrorKey(
     horizon_client::android::mirror_key(code);
 }
 
+/// `TextMirror.onMirrorDismissed`, called on the UI thread when Back or IME chrome dismisses it.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_juanluci_starling_TextMirror_onMirrorDismissed(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+) {
+    horizon_client::android::mirror_dismissed();
+}
+
 /// `StarlingActivity.onPointerCaptureLost`, called on the UI thread.
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_juanluci_starling_StarlingActivity_onPointerCaptureLost(
@@ -201,4 +210,37 @@ extern "system" fn Java_io_github_juanluci_starling_SecondaryDisplay_onImeActive
     active: jni::sys::jboolean,
 ) {
     horizon_client::android::on_secondary_ime_active(active != 0);
+}
+
+/// `SecondaryDisplay.onSecondaryImeHeight`, called on Android's UI thread from the secondary
+/// display's IME insets listener.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_juanluci_starling_SecondaryDisplay_onSecondaryImeHeight(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    pixels: i32,
+) {
+    horizon_client::android::set_secondary_ime_height(pixels);
+}
+
+/// `StarlingActivity.onClamshellHingeAngle`, called on Android's UI thread when the hinge sensor
+/// reports a new angle in degrees.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_juanluci_starling_StarlingActivity_onClamshellHingeAngle(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    degrees: jni::sys::jfloat,
+) {
+    horizon_client::android::on_clamshell_hinge_angle(degrees);
+}
+
+/// `StarlingActivity.onScreenPowerChanged`, called on Android's UI thread when displays turn off
+/// or back on.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_juanluci_starling_StarlingActivity_onScreenPowerChanged(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    interactive: jni::sys::jboolean,
+) {
+    horizon_client::android::on_screen_power_changed(interactive != 0);
 }

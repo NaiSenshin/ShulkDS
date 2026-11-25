@@ -243,6 +243,317 @@ fn android_utility_sprites(images: &[PackedImage]) -> Vec<PackedImage> {
     out
 }
 
+const SHULKDS_DIM_SPRITE_SIZE: usize = 14;
+
+/// Unified 14x14 pixel-art dimension thumbnails baked at atlas load time from
+/// the active pack's textures so every element snaps to the same coarse grid.
+fn shulkds_dimension_sprites(images: &[PackedImage]) -> Vec<PackedImage> {
+    struct DimCanvas {
+        px: [[u8; 4]; SHULKDS_DIM_SPRITE_SIZE * SHULKDS_DIM_SPRITE_SIZE],
+    }
+
+    impl DimCanvas {
+        fn new(bg: [u8; 4]) -> Self {
+            Self {
+                px: [[bg[0], bg[1], bg[2], 255]; SHULKDS_DIM_SPRITE_SIZE * SHULKDS_DIM_SPRITE_SIZE],
+            }
+        }
+
+        fn mul_u8(a: u8, b: u8) -> u8 {
+            ((u16::from(a) * u16::from(b)) / 255) as u8
+        }
+
+        fn blend_over(dst: &mut [u8; 4], src: [u8; 4]) {
+            let a = src[3];
+            if a == 255 {
+                *dst = [src[0], src[1], src[2], 255];
+            } else if a > 0 {
+                let ia = 255 - u16::from(a);
+                let sa = u16::from(a);
+                *dst = [
+                    ((u16::from(src[0]) * sa + u16::from(dst[0]) * ia) / 255) as u8,
+                    ((u16::from(src[1]) * sa + u16::from(dst[1]) * ia) / 255) as u8,
+                    ((u16::from(src[2]) * sa + u16::from(dst[2]) * ia) / 255) as u8,
+                    255,
+                ];
+            }
+        }
+
+        fn fill_rect(&mut self, dx: usize, dy: usize, dw: usize, dh: usize, color: [u8; 4]) {
+            let y_end = (dy + dh).min(SHULKDS_DIM_SPRITE_SIZE);
+            let x_end = (dx + dw).min(SHULKDS_DIM_SPRITE_SIZE);
+            for y in dy..y_end {
+                for x in dx..x_end {
+                    Self::blend_over(&mut self.px[y * SHULKDS_DIM_SPRITE_SIZE + x], color);
+                }
+            }
+        }
+
+        fn map_edge(i: usize, d_len: usize, s0: u32, s_len: u32) -> u32 {
+            if d_len <= 1 || s_len <= 1 {
+                s0 + s_len / 2
+            } else {
+                let num = i as u32 * (s_len - 1) + (d_len as u32 - 1) / 2;
+                s0 + num / (d_len as u32 - 1)
+            }
+        }
+
+        fn blit_sprite(
+            &mut self,
+            map: &HashMap<&str, (u32, u32, &[u8])>,
+            name: &str,
+            dest: [usize; 4],
+            src: [u32; 4],
+            tint: [u8; 4],
+            alpha_blend: bool,
+        ) {
+            let Some(&(iw, ih, data)) = map.get(name) else {
+                return;
+            };
+            let eff_h = if name.starts_with("block/") || name.starts_with("item/") {
+                ih.min(iw)
+            } else {
+                ih
+            };
+            let [dx, dy, dw, dh] = dest;
+            let [sx0, sy0, sw, sh] = src;
+            if iw == 0 || eff_h == 0 || dw == 0 || dh == 0 {
+                return;
+            }
+            for y in 0..dh {
+                let ty = dy + y;
+                if ty >= SHULKDS_DIM_SPRITE_SIZE {
+                    continue;
+                }
+                let sy = Self::map_edge(y, dh, sy0, sh).min(eff_h - 1);
+                for x in 0..dw {
+                    let tx = dx + x;
+                    if tx >= SHULKDS_DIM_SPRITE_SIZE {
+                        continue;
+                    }
+                    let sx = Self::map_edge(x, dw, sx0, sw).min(iw - 1);
+                    let idx = ((sy * iw + sx) * 4) as usize;
+                    let Some(p) = data.get(idx..idx + 4) else {
+                        continue;
+                    };
+                    if alpha_blend {
+                        let c = [
+                            Self::mul_u8(p[0], tint[0]),
+                            Self::mul_u8(p[1], tint[1]),
+                            Self::mul_u8(p[2], tint[2]),
+                            Self::mul_u8(p[3], tint[3]),
+                        ];
+                        Self::blend_over(&mut self.px[ty * SHULKDS_DIM_SPRITE_SIZE + tx], c);
+                    } else if p[3] >= 128 {
+                        self.px[ty * SHULKDS_DIM_SPRITE_SIZE + tx] = [
+                            Self::mul_u8(p[0], tint[0]),
+                            Self::mul_u8(p[1], tint[1]),
+                            Self::mul_u8(p[2], tint[2]),
+                            255,
+                        ];
+                    }
+                }
+            }
+        }
+
+        fn into_rgba(self) -> Vec<u8> {
+            self.px.into_iter().flatten().collect()
+        }
+    }
+
+    let map: HashMap<&str, (u32, u32, &[u8])> = images
+        .iter()
+        .map(|(name, w, h, data)| (name.as_str(), (*w, *h, data.as_slice())))
+        .collect();
+    let n = SHULKDS_DIM_SPRITE_SIZE as u32;
+    let mut out = Vec::with_capacity(3);
+
+    if map.contains_key("block/grass_block_side") {
+        let mut c = DimCanvas::new([0x72, 0xA4, 0xFE, 255]);
+        c.fill_rect(0, 5, 14, 5, [0x9E, 0xC4, 0xFF, 255]);
+        c.fill_rect(8, 3, 3, 1, [0xF6, 0xFA, 0xFF, 255]);
+        c.fill_rect(7, 4, 5, 1, [0xE6, 0xF0, 0xFF, 255]);
+        c.fill_rect(10, 1, 3, 3, [0xFF, 0xEC, 0x8B, 255]);
+        c.fill_rect(11, 1, 2, 2, [0xFF, 0xFF, 0xEA, 255]);
+        c.blit_sprite(
+            &map,
+            "block/grass_block_side",
+            [0, 10, 14, 4],
+            [0, 0, 14, 6],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/grass_block_side_overlay",
+            [0, 10, 14, 4],
+            [0, 0, 14, 6],
+            [126, 200, 92, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "gui/sprites/toast/tree",
+            [0, 1, 8, 5],
+            [2, 0, 15, 10],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "gui/sprites/toast/tree",
+            [3, 6, 2, 4],
+            [8, 10, 4, 10],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/poppy",
+            [9, 6, 3, 2],
+            [6, 7, 5, 2],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/poppy",
+            [9, 8, 3, 2],
+            [6, 11, 5, 4],
+            [255, 255, 255, 255],
+            false,
+        );
+        out.push(("shulkds/dim_overworld".to_owned(), n, n, c.into_rgba()));
+    }
+
+    if map.contains_key("block/netherrack") {
+        let mut c = DimCanvas::new([42, 10, 12, 255]);
+        c.blit_sprite(
+            &map,
+            "block/netherrack",
+            [0, 0, 14, 10],
+            [0, 0, 14, 10],
+            [124, 52, 52, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/netherrack",
+            [0, 0, 14, 2],
+            [0, 0, 14, 2],
+            [178, 82, 82, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/glowstone",
+            [8, 1, 5, 3],
+            [2, 1, 12, 9],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/lava_still",
+            [10, 4, 2, 6],
+            [6, 0, 4, 12],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/lava_still",
+            [8, 10, 6, 4],
+            [0, 0, 12, 8],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/crimson_nylium_side",
+            [0, 10, 8, 4],
+            [0, 0, 12, 6],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/crimson_fungus",
+            [1, 3, 6, 7],
+            [3, 4, 10, 12],
+            [255, 255, 255, 255],
+            false,
+        );
+        out.push(("shulkds/dim_nether".to_owned(), n, n, c.into_rgba()));
+    }
+
+    if map.contains_key("block/end_stone") {
+        let mut c = DimCanvas::new([18, 11, 30, 255]);
+        c.blit_sprite(
+            &map,
+            "environment/end_sky",
+            [0, 0, 14, 14],
+            [0, 0, 28, 28],
+            [145, 98, 210, 150],
+            true,
+        );
+        c.fill_rect(2, 1, 1, 1, [232, 212, 255, 255]);
+        c.fill_rect(6, 2, 1, 1, [205, 178, 248, 255]);
+        c.fill_rect(1, 4, 1, 1, [190, 160, 240, 255]);
+        c.blit_sprite(
+            &map,
+            "block/obsidian",
+            [8, 5, 5, 5],
+            [2, 2, 10, 10],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "item/end_crystal",
+            [8, 0, 5, 5],
+            [2, 1, 13, 14],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/chorus_plant",
+            [3, 8, 2, 2],
+            [5, 2, 6, 10],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/chorus_flower",
+            [2, 5, 4, 3],
+            [2, 3, 12, 10],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/end_stone",
+            [1, 10, 12, 3],
+            [0, 0, 14, 5],
+            [255, 255, 255, 255],
+            false,
+        );
+        c.blit_sprite(
+            &map,
+            "block/end_stone",
+            [3, 13, 8, 1],
+            [2, 5, 10, 2],
+            [192, 186, 140, 255],
+            false,
+        );
+        out.push(("shulkds/dim_end".to_owned(), n, n, c.into_rgba()));
+    }
+
+    out
+}
+
 /// Atlas slots for armour trim textures made at run time (`trims`), each the
 /// size of the largest trim texture.
 pub const TRIM_SLOTS: usize = 32;
@@ -2180,6 +2491,7 @@ impl HudAtlas {
         let touch = builtin_touch_sprites(&images);
         images.extend(touch);
         images.extend(android_utility_sprites(&images));
+        images.extend(shulkds_dimension_sprites(&images));
         // The title screen's "JAVA EDITION" banner reads "RUST EDITION".
         if let Some(edition) = images
             .iter_mut()
@@ -5348,5 +5660,39 @@ texture=wide",
         assert_eq!(positions, [(0, 0), (513, 0), (513, 251)]);
         assert_eq!(bottom, 501);
         assert!(bottom + GLYPH_ROWS <= 1024);
+    }
+
+    #[test]
+    fn shulkds_dimension_sprites_bake_opaque_14x14_grids() {
+        assert!(shulkds_dimension_sprites(&[]).is_empty());
+
+        let solid = |r: u8, g: u8, b: u8| -> Vec<u8> {
+            std::iter::repeat_n([r, g, b, 255], 16 * 16)
+                .flatten()
+                .collect()
+        };
+        let images = vec![
+            (
+                "block/grass_block_side".to_owned(),
+                16,
+                16,
+                solid(112, 82, 56),
+            ),
+            ("block/netherrack".to_owned(), 16, 16, solid(104, 42, 42)),
+            ("block/end_stone".to_owned(), 16, 16, solid(218, 214, 158)),
+        ];
+        let baked = shulkds_dimension_sprites(&images);
+        assert_eq!(baked.len(), 3);
+        let expected_names = [
+            "shulkds/dim_overworld",
+            "shulkds/dim_nether",
+            "shulkds/dim_end",
+        ];
+        for (idx, (name, w, h, pixels)) in baked.iter().enumerate() {
+            assert_eq!(name, expected_names[idx]);
+            assert_eq!((*w, *h), (14, 14));
+            assert_eq!(pixels.len(), 14 * 14 * 4);
+            assert!(pixels.chunks_exact(4).all(|px| px[3] == 255));
+        }
     }
 }

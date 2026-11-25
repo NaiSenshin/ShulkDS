@@ -2549,6 +2549,8 @@ struct Game<'a> {
     pub(super) secondary_compositor: Option<horizon_client::gfx::compositor::Compositor>,
     secondary_surface_gen: u64,
     secondary_surface_ptr: Option<usize>,
+    lid_sleeping: bool,
+    streaming_paused_before_sleep: bool,
     /// Avoid an endless rebuild loop if the new device is lost as well.
     last_device_recovery: Option<Instant>,
     /// CPU geometry storage retained across frames, including empty/title frames.
@@ -7966,21 +7968,25 @@ impl Game<'_> {
         self.has_singleplayer_server()
             && !self.is_published()
             && self.title.is_none()
-            && (matches!(
-                self.screen,
-                Screen::Paused
-                    | Screen::Options
-                    | Screen::Stats
-                    | Screen::Advancements
-                    | Screen::WorldOptions
-                    | Screen::Friends
-                    | Screen::Social
-                    | Screen::ServerLinks
-                    | Screen::ConfirmLink
-                    | Screen::DialogWarning
-                    | Screen::CommandBlock
-                    | Screen::DebugOptions
-            ) || self.book.is_some()
+            && ((self.lid_sleeping
+                && self.settings.extras.shulkds_lid_sleep
+                    != horizon_client::dual_screen::LidSleepMode::Off)
+                || matches!(
+                    self.screen,
+                    Screen::Paused
+                        | Screen::Options
+                        | Screen::Stats
+                        | Screen::Advancements
+                        | Screen::WorldOptions
+                        | Screen::Friends
+                        | Screen::Social
+                        | Screen::ServerLinks
+                        | Screen::ConfirmLink
+                        | Screen::DialogWarning
+                        | Screen::CommandBlock
+                        | Screen::DebugOptions
+                )
+                || self.book.is_some()
                 || self.win_screen_pauses())
     }
     /// A screen open over gameplay while `screen` stays `Playing`: a book or
@@ -14728,6 +14734,7 @@ impl Game<'_> {
             std::sync::atomic::Ordering::Relaxed,
         );
         self.apply_ui_settings();
+        self.sync_platform_lid_sleep_pref();
     }
     /// The sprite layers a shader pack draws in the translucent pass: every section is meshed
     /// again when they change.
@@ -17728,7 +17735,7 @@ fn shulkds_desktop_window_logical_size(
 
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
+        if let Some(window) = self.window.clone() {
             // Back from the background (Android): the same window, a new native surface.
             let size = window.inner_size();
             if let Some(r) = &mut self.renderer
@@ -17736,7 +17743,14 @@ impl ApplicationHandler for Game<'_> {
             {
                 log::warn!("Horizon: the window's surface did not come back: {e}");
             }
-            self.audio.resume_output();
+            horizon_client::dual_screen_android::update_app_suspended(false);
+            let now = Instant::now();
+            self.previous = now;
+            self.frame_end = now;
+            self.sync_clamshell_sleep();
+            if !self.lid_sleeping {
+                self.audio.resume_output();
+            }
             window.request_redraw();
             // The next time it goes, it saves again.
             self.saved_for_background = false;
@@ -17834,6 +17848,7 @@ impl ApplicationHandler for Game<'_> {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_clamshell_sleep();
         self.sync_secondary_display();
         #[cfg(not(target_os = "android"))]
         if self.shulkds.config.enabled
@@ -17878,6 +17893,8 @@ impl ApplicationHandler for Game<'_> {
             crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
             crate::diagnostics::request_flush();
         }
+        horizon_client::dual_screen_android::update_app_suspended(true);
+        self.sync_clamshell_sleep();
         self.detach_secondary_surface();
         if let Some(r) = &mut self.renderer {
             r.suspend();
@@ -19897,6 +19914,64 @@ impl Game<'_> {
             }
         }
     }
+    fn sync_clamshell_sleep(&mut self) {
+        let sleeping = horizon_client::dual_screen_android::is_clamshell_sleeping();
+        if sleeping && !self.lid_sleeping {
+            self.lid_sleeping = true;
+            log::info!(
+                "ShulkDS: entering clamshell sleep (mode: {})",
+                self.settings.extras.shulkds_lid_sleep.name()
+            );
+            if self.settings.extras.shulkds_lid_sleep
+                == horizon_client::dual_screen::LidSleepMode::Pause
+                && self.title.is_none()
+                && self.player.is_some()
+                && self.screen == Screen::Playing
+                && !self.screen_over_playing()
+            {
+                self.pause_focus = None;
+                self.pause_menu = true;
+                self.screen = Screen::Paused;
+            }
+            self.pause = self.pauses_game();
+            if let Some(server) = &self.integrated {
+                server.set_paused(self.pause);
+            }
+            self.save_for_background();
+            self.streaming_paused_before_sleep = self.streaming.paused;
+            self.streaming.paused = true;
+            distant_horizons_bridge::set_paused(true);
+            self.audio.suspend_output();
+            self.stop_mining();
+            self.keys.clear();
+            self.physical_keys.clear();
+            self.touch_release_all();
+            self.platform_enter_sleep();
+        } else if !sleeping && self.lid_sleeping {
+            self.lid_sleeping = false;
+            log::info!("ShulkDS: waking from clamshell sleep");
+            let now = Instant::now();
+            self.previous = now;
+            self.frame_end = now;
+            self.focus_lost = None;
+            if self.title.is_none() && self.pending_save.is_none() {
+                self.streaming.paused = self.streaming_paused_before_sleep;
+            }
+            distant_horizons_bridge::set_paused(false);
+            self.pause = self.pauses_game();
+            if let Some(server) = &self.integrated {
+                server.set_paused(self.pause);
+            }
+            if self.renderer.as_ref().is_some_and(|r| !r.detached) {
+                self.audio.resume_output();
+            }
+            self.shulkds.dashboard.last_bottom_telemetry_sig = 0;
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+    }
+
     /// winit's `about_to_wait`: what happens between frames (stop requests, the closing
     /// save, world entry, the control socket, pads), then the next frame.
     pub(super) fn idle(&mut self, event_loop: &dyn EventLoopCtl) {
@@ -19956,6 +20031,16 @@ impl Game<'_> {
         if self.pending_save.is_some() {
             return;
         }
+        if self.lid_sleeping {
+            if self.control.is_some() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(100),
+                ));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
+            return;
+        }
         // The mouse and the keyboard as Android's input hook saw them (game/input_mode.rs).
         #[cfg(target_os = "android")]
         self.android_input_frame(event_loop);
@@ -19981,11 +20066,15 @@ impl Game<'_> {
             return;
         }
         if self.renderer.as_ref().is_some_and(|r| r.detached) {
-            // No window to draw in (Android in the background): wake now and then for the
-            // control socket instead of spinning.
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(100),
-            ));
+            // No window to draw in (Android in the background): wake now and then only if the
+            // control socket is open, else sleep at 0 Hz until resumed.
+            if self.control.is_some() {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(100),
+                ));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            }
             return;
         }
         if let Some(w) = &self.window {
@@ -20631,6 +20720,8 @@ impl<'a> Game<'a> {
             secondary_compositor: None,
             secondary_surface_gen: 0,
             secondary_surface_ptr: None,
+            lid_sleeping: false,
+            streaming_paused_before_sleep: false,
         })
     }
 }
@@ -22420,6 +22511,7 @@ impl Loading {
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.suspended = false;
+        horizon_client::dual_screen_android::update_app_suspended(false);
         if let Some(window) = &self.window {
             // Back from the background (Android), as Game::resumed.
             let size = window.inner_size();
@@ -22552,6 +22644,7 @@ impl Loading {
             crate::diagnostics::heartbeat("suspended", || serde_json::json!({}));
             crate::diagnostics::request_flush();
         }
+        horizon_client::dual_screen_android::update_app_suspended(true);
         self.suspended = true;
         if let Some(r) = &mut self.renderer {
             r.suspend();
@@ -22749,11 +22842,17 @@ impl Loading {
             event_loop.exit();
             return;
         }
-        if self.renderer.as_ref().is_some_and(|r| r.detached) {
-            // In the background (Android), as Game::about_to_wait.
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(100),
-            ));
+        if self.renderer.as_ref().is_some_and(|r| r.detached)
+            || horizon_client::dual_screen_android::is_clamshell_sleeping()
+        {
+            // In the background / sleeping (Android): sleep at 0 Hz once loading finished.
+            if self.loaded.is_some() {
+                event_loop.set_control_flow(ControlFlow::Wait);
+            } else {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_millis(100),
+                ));
+            }
             return;
         }
         if let Some(w) = &self.window {
@@ -23214,7 +23313,12 @@ fn run_loading(
         suspended: false,
     };
     let mut app = App::Loading(Box::new(loading));
-    let result = event_loop()?.run_app(&mut app);
+    let el = event_loop()?;
+    let proxy = el.create_proxy();
+    horizon_client::dual_screen_android::register_sleep_wake_notifier(move || {
+        let _ = proxy.send_event(());
+    });
+    let result = el.run_app(&mut app);
     narrator::stop();
     match &mut app {
         // Ready: splitscreen around P1's game.
@@ -24425,6 +24529,21 @@ impl Game<'_> {
     fn platform_first_frame(&self) {
         #[cfg(target_os = "android")]
         crate::android::first_frame_shown();
+    }
+    pub(super) fn sync_platform_lid_sleep_pref(&self) {
+        let enabled = self.settings.extras.shulkds_lid_sleep
+            != horizon_client::dual_screen::LidSleepMode::Off;
+        #[cfg(target_os = "android")]
+        crate::android::set_lid_sleep_enabled(enabled);
+        #[cfg(not(target_os = "android"))]
+        horizon_client::dual_screen_android::set_lid_sleep_enabled(enabled);
+    }
+    fn platform_enter_sleep(&self) {
+        #[cfg(target_os = "android")]
+        {
+            crate::android::release_all_inputs();
+            crate::android::suspend_frame_hint();
+        }
     }
 }
 

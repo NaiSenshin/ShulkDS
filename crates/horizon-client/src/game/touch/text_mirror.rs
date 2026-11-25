@@ -87,6 +87,10 @@ pub(super) struct Mirror {
 }
 
 impl Mirror {
+    pub(super) fn is_shown(&self) -> bool {
+        self.shown.is_some() || self.native
+    }
+
     /// The field shown now (None: no editor wanted) against what the editor holds: what to tell
     /// it, if anything.
     pub(super) fn sync(&mut self, field: Option<Field>) -> Option<Push> {
@@ -309,16 +313,20 @@ impl Game<'_> {
             // AnvilScreen's name box holds 50.
             "anvil" => field(("anvil", 0), &self.station.as_ref()?.name, None, 50, DONE),
             // A tap on the box puts its cursor under the finger: the editor holds it too.
-            "creative" => field(
-                ("creative", 0),
-                &self.creative_screen.search.value,
-                Some((
-                    self.creative_screen.search.cursor,
-                    self.creative_screen.search.highlight,
-                )),
-                super::super::clipboard::CREATIVE_SEARCH_CHARS,
-                SEARCH,
-            ),
+            "creative" => {
+                let search = if self.use_legacy_creative() {
+                    &self.legacy_creative.search
+                } else {
+                    &self.creative_screen.search
+                };
+                field(
+                    ("creative", 0),
+                    &search.value,
+                    Some((search.cursor, search.highlight)),
+                    super::super::clipboard::CREATIVE_SEARCH_CHARS,
+                    SEARCH,
+                )
+            }
             // RecipeBookComponent's search box.
             "recipe" => edit_box_field(("recipe", 0), self.recipe_search_box()?, SEARCH),
             // The options' searches (languages, settings, packs), Skin Customization's name and
@@ -380,11 +388,23 @@ impl Game<'_> {
                 }
             }
             "creative" => {
-                let search = &mut self.creative_screen.search;
-                let before = search.value.clone();
-                edit_box_set(search, text, cursor, anchor);
-                if search.value != before {
-                    self.creative_screen.scroll = 0.0;
+                if self.use_legacy_creative() {
+                    let search = &mut self.legacy_creative.search;
+                    let before = search.value.clone();
+                    edit_box_set(search, text, cursor, anchor);
+                    if search.value != before {
+                        let tab = self.legacy_creative.tab;
+                        if tab < self.legacy_creative.scroll_rows.len() {
+                            self.legacy_creative.scroll_rows[tab] = 0;
+                        }
+                    }
+                } else {
+                    let search = &mut self.creative_screen.search;
+                    let before = search.value.clone();
+                    edit_box_set(search, text, cursor, anchor);
+                    if search.value != before {
+                        self.creative_screen.scroll = 0.0;
+                    }
                 }
             }
             "recipe" => {
@@ -456,7 +476,17 @@ impl Game<'_> {
             Some("sign") => self.sign_input(None, Some(text)),
             Some("book") => self.book_input(None, Some(text)),
             Some("anvil") => self.station_text(Some(text), false),
-            Some("creative") => self.creative_search_edit(Some(text)),
+            Some("creative") => {
+                if self.use_legacy_creative() {
+                    self.legacy_creative.search.insert_text(text);
+                    let tab = self.legacy_creative.tab;
+                    if tab < self.legacy_creative.scroll_rows.len() {
+                        self.legacy_creative.scroll_rows[tab] = 0;
+                    }
+                } else {
+                    self.creative_search_edit(Some(text));
+                }
+            }
             Some("title") => self.title_edit(Some(text), false),
             #[cfg(target_os = "android")]
             Some("catalog") => self.catalog_type(text),
@@ -476,7 +506,19 @@ impl Game<'_> {
                 _ => self.command_block_key_code(key, None, None),
             },
             Some("anvil") if key == KeyCode::Backspace => self.station_text(None, true),
-            Some("creative") if key == KeyCode::Backspace => self.creative_search_backspace(false),
+            Some("creative") if key == KeyCode::Backspace => {
+                if self.use_legacy_creative() {
+                    self.legacy_creative
+                        .search
+                        .key(KeyCode::Backspace, false, false);
+                    let tab = self.legacy_creative.tab;
+                    if tab < self.legacy_creative.scroll_rows.len() {
+                        self.legacy_creative.scroll_rows[tab] = 0;
+                    }
+                } else {
+                    self.creative_search_backspace(false);
+                }
+            }
             Some("recipe") if key == KeyCode::Backspace => self.recipe_text(None, true),
             Some("world") if key == KeyCode::Backspace => self.world_options_text(None),
             // As the options take them from a keyboard: Enter keeps Skin Customization's name or
@@ -551,7 +593,8 @@ impl Game<'_> {
     /// decided: what the editor did applied in order, then the editor shown, told the field's
     /// own changes or put away; or NativeActivity's keyboard for a field it cannot read.
     #[cfg(target_os = "android")]
-    pub(in crate::game) fn android_keyboard(&mut self, keyboard: bool) {
+    pub(in crate::game) fn android_keyboard(&mut self, keyboard: bool) -> bool {
+        let requested = std::mem::take(&mut self.touch.keyboard_request);
         for event in crate::android::take_mirror_events() {
             match event {
                 crate::android::MirrorEvent::Edit {
@@ -560,6 +603,12 @@ impl Game<'_> {
                     anchor,
                     generation,
                 } => self.mirror_edit(&text, cursor, anchor, generation),
+                crate::android::MirrorEvent::Dismissed => {
+                    if !requested {
+                        self.touch.wanted = false;
+                        self.touch.ime_seen = false;
+                    }
+                }
                 _ if self.touch.mirror.shown.is_none() => {}
                 crate::android::MirrorEvent::Action => self.mirror_action(),
                 // Back closes the keyboard, not the page under the catalog.
@@ -576,10 +625,10 @@ impl Game<'_> {
                 }
             }
         }
+        let keyboard = keyboard && self.touch.wanted;
         let field = if keyboard { self.mirror_field() } else { None };
         // A field the editor cannot read (not one that just went, with the line sent).
         let unread = keyboard && field.is_none() && self.text_context().is_some();
-        let requested = std::mem::take(&mut self.touch.keyboard_request);
         let push = self
             .touch
             .mirror
@@ -615,6 +664,7 @@ impl Game<'_> {
             }
             self.touch.mirror.native = native;
         }
+        keyboard
     }
 }
 
@@ -649,6 +699,21 @@ mod tests {
         );
         assert_eq!(m.sync_requested(None, true), Some(Push::Hide));
         assert_eq!(m.sync_requested(None, true), None);
+    }
+
+    #[test]
+    fn mirror_is_shown_tracks_show_and_hide() {
+        let mut m = Mirror::default();
+        assert!(!m.is_shown());
+        assert!(matches!(
+            m.sync(Some(field(0, "abc", Some((3, 3))))),
+            Some(Push::Show(..))
+        ));
+        assert!(m.is_shown());
+        assert_eq!(m.sync(None), Some(Push::Hide));
+        assert!(!m.is_shown());
+        assert_eq!(m.sync(None), None);
+        assert!(!m.is_shown());
     }
 
     #[test]

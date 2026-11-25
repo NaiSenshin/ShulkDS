@@ -2385,6 +2385,7 @@ pub mod engine {
         settings: Mutex<WorkSettings>,
         done: Mutex<Vec<Meshed<H::Mesh>>>,
         stop: AtomicBool,
+        paused: AtomicBool,
         generated: AtomicUsize,
         /// Each meshed section's face count.
         quads: Mutex<HashMap<i64, usize>>,
@@ -2462,6 +2463,7 @@ pub mod engine {
                 settings: Mutex::new(settings),
                 done: Mutex::new(Vec::new()),
                 stop: AtomicBool::new(false),
+                paused: AtomicBool::new(false),
                 generated: AtomicUsize::new(0),
                 chunks: AtomicUsize::new(0),
                 active: AtomicUsize::new(0),
@@ -2491,6 +2493,14 @@ pub mod engine {
                 shown_near: HashMap::new(),
                 last_save: Instant::now(),
                 player: [0.0; 2],
+            }
+        }
+
+        /// Pause or resume background LOD workers without tearing down state.
+        pub fn set_paused(&self, paused: bool) {
+            let was = self.shared.paused.swap(paused, Ordering::AcqRel);
+            if was && !paused {
+                self.shared.ready.notify_all();
             }
         }
 
@@ -2841,7 +2851,9 @@ pub mod engine {
                     if shared.stop.load(Ordering::Relaxed) {
                         return;
                     }
-                    if let Some(next) = q.heap.pop() {
+                    if !shared.paused.load(Ordering::Acquire)
+                        && let Some(next) = q.heap.pop()
+                    {
                         // Counted before the queue is let go: never neither.
                         shared.active.fetch_add(1, Ordering::Relaxed);
                         let chunk = match next.job {

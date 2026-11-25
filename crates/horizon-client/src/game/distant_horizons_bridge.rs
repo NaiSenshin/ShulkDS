@@ -842,6 +842,15 @@ fn compute_active_cutout(session: &Session, near: &Near) -> FxHashSet<(i32, i32)
     out
 }
 
+/// Pause or resume Distant Horizons background LOD workers (e.g., while dual-screen lid is closed).
+pub(super) fn set_paused(paused: bool) {
+    SESSION.with_borrow(|s| {
+        if let Some(session) = s.as_ref() {
+            session.engine.set_paused(paused);
+        }
+    });
+}
+
 /// Once a frame (`native_frame`).
 pub(super) fn frame(game: &mut Game<'_>) {
     if !game.native_window() {

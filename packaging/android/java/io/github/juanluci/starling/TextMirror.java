@@ -47,6 +47,9 @@ final class TextMirror extends EditText {
     /** A key for the game, KeyEvent.KEYCODE_*. */
     private static native void onMirrorKey(int keyCode);
 
+    /** The user dismissed the keyboard from the editor or system chrome (android_lib.rs). */
+    static native void onMirrorDismissed();
+
     private final InputMethodManager keyboard;
     /** The flags last set (the keyboard's kind of text), -1 before the first. */
     private int flags = -1;
@@ -60,6 +63,10 @@ final class TextMirror extends EditText {
     private boolean reportPosted;
     /** Set at the end of the constructor: EditText's own calls the overrides before. */
     private boolean ready;
+    /** Whether the mirror currently owns an open keyboard session. */
+    private boolean active;
+    /** Host container callback invoked when pre-IME Back dismisses the keyboard. */
+    private Runnable dismissListener;
 
     private final Runnable report = new Runnable() {
         @Override
@@ -107,8 +114,13 @@ final class TextMirror extends EditText {
         ready = true;
     }
 
+    void setDismissListener(Runnable listener) {
+        this.dismissListener = listener;
+    }
+
     /** Focused, holding the game's field, and the keyboard up. */
     void show(String text, int cursor, int anchor, int maxLength, int flags, int generation) {
+        active = true;
         setFocusable(true);
         setFocusableInTouchMode(true);
         update(text, cursor, anchor, maxLength, flags, generation);
@@ -121,15 +133,49 @@ final class TextMirror extends EditText {
     /** showKeyboard's attempts so far. */
     private int showTries;
 
-    /** The keyboard up: Android refuses until it serves the newly focused editor, a moment on. */
+    /** The keyboard up: Android refuses until the window and editor hold focus, a moment on. */
     private final Runnable showKeyboard = new Runnable() {
         @Override
         public void run() {
-            if (hasFocus() && !keyboard.showSoftInput(TextMirror.this, 0) && ++showTries < 10) {
-                postDelayed(this, 50);
+            if (!active) {
+                return;
+            }
+            if (!hasFocus()) {
+                requestFocus();
+                if (++showTries < 20) {
+                    postDelayed(this, 50);
+                }
+                return;
+            }
+            if (!keyboard.showSoftInput(TextMirror.this, InputMethodManager.SHOW_IMPLICIT)) {
+                if (android.os.Build.VERSION.SDK_INT >= 30) {
+                    android.view.WindowInsetsController insetsController = getWindowInsetsController();
+                    if (insetsController != null) {
+                        insetsController.show(android.view.WindowInsets.Type.ime());
+                    }
+                }
+                if (++showTries < 20) {
+                    postDelayed(this, 50);
+                }
+            } else if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.view.WindowInsetsController insetsController = getWindowInsetsController();
+                if (insetsController != null) {
+                    insetsController.show(android.view.WindowInsets.Type.ime());
+                }
             }
         }
     };
+
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (active && hasWindowFocus) {
+            requestFocus();
+            showTries = 0;
+            removeCallbacks(showKeyboard);
+            post(showKeyboard);
+        }
+    }
 
     /**
      * The game's field as it is now: its text, the cursor and the selection's other end in code
@@ -166,14 +212,36 @@ final class TextMirror extends EditText {
 
     /** Put away with the keyboard, the edits not yet sent sent. */
     void hide() {
+        active = false;
         flush();
         removeCallbacks(showKeyboard);
-        if (hasFocus()) {
-            keyboard.hideSoftInputFromWindow(getWindowToken(), 0);
+        clearFocus();
+        android.os.IBinder token = getWindowToken();
+        if (keyboard != null && token != null) {
+            keyboard.hideSoftInputFromWindow(token, 0);
         }
-        // Clears the focus too.
+        // Clears focusable flags too so Android never re-focuses it unexpectedly.
         setFocusable(false);
         setFocusableInTouchMode(false);
+    }
+
+    @Override
+    public boolean onKeyPreIme(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && active) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                return true;
+            }
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                if (dismissListener != null) {
+                    dismissListener.run();
+                } else {
+                    hide();
+                    onMirrorDismissed();
+                }
+                return true;
+            }
+        }
+        return super.onKeyPreIme(keyCode, event);
     }
 
     /** The UTF-16 index of code point `points` of `text`. */

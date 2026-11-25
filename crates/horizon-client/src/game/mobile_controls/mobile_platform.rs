@@ -59,6 +59,10 @@ pub fn poll() -> Vec<Output> {
             }
             E::Action => out.push(Output::Enter),
             E::Key(111) => out.push(Output::Close),
+            E::Dismissed => {
+                MIRROR.lock().unwrap_or_else(|e| e.into_inner()).active = false;
+                out.push(Output::Close);
+            }
             E::Key(67) => out.push(Output::Backspace),
             _ => {}
         }

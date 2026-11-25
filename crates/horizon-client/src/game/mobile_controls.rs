@@ -186,6 +186,9 @@ impl Game<'_> {
     pub(in crate::game) fn mobile_keyboard_active(&self) -> bool {
         mobile_platform::active()
     }
+    pub(in crate::game) fn mobile_hide_keyboard(&self) {
+        mobile_platform::hide();
+    }
     pub(in crate::game) fn mobile_open_editor(&mut self) {
         self.mobile_init();
         self.android_release_touch_keys(true);

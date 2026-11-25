@@ -158,6 +158,8 @@ pub struct Extras {
     pub shulkds_classic_inventory: bool,
     /// ShulkDS: check GitHub releases for new ShulkDS updates on launch.
     pub shulkds_auto_updates: bool,
+    /// ShulkDS: low-power sleep behavior when closing a clamshell dual-screen device.
+    pub shulkds_lid_sleep: crate::dual_screen::LidSleepMode,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -209,6 +211,7 @@ impl Default for Extras {
             shulkds_classic_crafting: false,
             shulkds_classic_inventory: false,
             shulkds_auto_updates: true,
+            shulkds_lid_sleep: crate::dual_screen::LidSleepMode::Pause,
         }
     }
 }
@@ -315,6 +318,9 @@ impl Extras {
                     e.shulkds_classic_inventory = flag(e.shulkds_classic_inventory);
                 }
                 "shulkdsAutoUpdates" => e.shulkds_auto_updates = flag(e.shulkds_auto_updates),
+                "shulkdsLidSleep" => {
+                    e.shulkds_lid_sleep = crate::dual_screen::LidSleepMode::parse(value);
+                }
                 _ => {}
             }
         }
@@ -322,7 +328,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\nshulkdsHotbar:{}\nshulkdsClassicCrafting:{}\nshulkdsClassicInventory:{}\nshulkdsAutoUpdates:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\nshulkdsHotbar:{}\nshulkdsClassicCrafting:{}\nshulkdsClassicInventory:{}\nshulkdsAutoUpdates:{}\nshulkdsLidSleep:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -375,6 +381,7 @@ impl Extras {
             bool_text(self.shulkds_classic_crafting),
             bool_text(self.shulkds_classic_inventory),
             bool_text(self.shulkds_auto_updates),
+            self.shulkds_lid_sleep.name(),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -530,6 +537,7 @@ pub enum Item {
     ShulkdsClassicCrafting,
     ShulkdsClassicInventory,
     ShulkdsAutoUpdates,
+    ShulkdsLidSleep,
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -537,6 +545,7 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
     let mut rows = vec![
         Err("horizon.extras.header.shulkds"),
         Ok(ShulkdsHotbar),
+        Ok(ShulkdsLidSleep),
         Ok(ShulkdsClassicCrafting),
         Ok(ShulkdsClassicInventory),
         Ok(ShulkdsAutoUpdates),
@@ -601,6 +610,7 @@ impl Item {
             Item::ShulkdsClassicCrafting => "horizon.extras.shulkds_classic_crafting",
             Item::ShulkdsClassicInventory => "horizon.extras.shulkds_classic_inventory",
             Item::ShulkdsAutoUpdates => "horizon.extras.shulkds_auto_updates",
+            Item::ShulkdsLidSleep => "horizon.extras.shulkds_lid_sleep",
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -631,6 +641,7 @@ impl Item {
             Item::ShulkdsClassicCrafting => "horizon.extras.shulkds_classic_crafting.tooltip",
             Item::ShulkdsClassicInventory => "horizon.extras.shulkds_classic_inventory.tooltip",
             Item::ShulkdsAutoUpdates => "horizon.extras.shulkds_auto_updates.tooltip",
+            Item::ShulkdsLidSleep => "horizon.extras.shulkds_lid_sleep.tooltip",
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -670,6 +681,7 @@ impl Item {
             Item::ShulkdsClassicCrafting => "Classic Crafting",
             Item::ShulkdsClassicInventory => "Classic Inventory",
             Item::ShulkdsAutoUpdates => "Auto Updates",
+            Item::ShulkdsLidSleep => "Lid Sleep Mode",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -700,7 +712,8 @@ impl Item {
             | ShulkdsHotbar
             | ShulkdsClassicCrafting
             | ShulkdsClassicInventory
-            | ShulkdsAutoUpdates => {
+            | ShulkdsAutoUpdates
+            | ShulkdsLidSleep => {
                 return None;
             }
         })
@@ -779,6 +792,9 @@ impl Item {
             Item::ShulkdsAutoUpdates => {
                 "Check GitHub Releases when ShulkDS starts and prompt to download and install new updates."
             }
+            Item::ShulkdsLidSleep => {
+                "Put ShulkDS into low-power sleep when closing your clamshell handheld: wake onto the Pause menu, resume straight into gameplay like a 3DS, or turn lid sleep off."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -800,7 +816,8 @@ impl Item {
             | Item::ShulkdsHotbar
             | Item::ShulkdsClassicCrafting
             | Item::ShulkdsClassicInventory
-            | Item::ShulkdsAutoUpdates => Some(Cost::None),
+            | Item::ShulkdsAutoUpdates
+            | Item::ShulkdsLidSleep => Some(Cost::None),
             Item::CosmeticsMine | Item::CosmeticsOthers => Some(Cost::Low),
             _ => None,
         }
@@ -841,6 +858,10 @@ impl Item {
             Item::ShulkdsHotbar => {
                 crate::lang::get_or(e.shulkds_hotbar.label_key(), e.shulkds_hotbar.short_label())
             }
+            Item::ShulkdsLidSleep => crate::lang::get_or(
+                e.shulkds_lid_sleep.label_key(),
+                e.shulkds_lid_sleep.short_label(),
+            ),
             other => match other.switch(e) {
                 Some(true) => crate::lang::get_or("On", "On"),
                 _ => crate::lang::get_or("Off", "Off"),
@@ -872,11 +893,14 @@ impl Item {
             Item::CosmeticsMine => e.cosmetics_mine = !e.cosmetics_mine,
             Item::CosmeticsOthers => e.cosmetics_others = !e.cosmetics_others,
             Item::ShulkdsHotbar => e.shulkds_hotbar = e.shulkds_hotbar.cycle(back),
-            Item::ShulkdsClassicCrafting => e.shulkds_classic_crafting = !e.shulkds_classic_crafting,
+            Item::ShulkdsClassicCrafting => {
+                e.shulkds_classic_crafting = !e.shulkds_classic_crafting
+            }
             Item::ShulkdsClassicInventory => {
                 e.shulkds_classic_inventory = !e.shulkds_classic_inventory;
             }
             Item::ShulkdsAutoUpdates => e.shulkds_auto_updates = !e.shulkds_auto_updates,
+            Item::ShulkdsLidSleep => e.shulkds_lid_sleep = e.shulkds_lid_sleep.cycle(back),
             Item::SortKey => {}
         }
     }
@@ -1063,6 +1087,7 @@ mod tests {
         assert!(!e.shulkds_classic_crafting);
         assert!(!e.shulkds_classic_inventory);
         assert!(e.shulkds_auto_updates);
+        assert_eq!(e.shulkds_lid_sleep, crate::dual_screen::LidSleepMode::Pause);
 
         Item::ShulkdsHotbar.cycle(&mut e, false);
         assert_eq!(
@@ -1073,6 +1098,11 @@ mod tests {
         assert_eq!(
             e.shulkds_hotbar,
             crate::dual_screen::HotbarPosition::TopScreenClassic
+        );
+        Item::ShulkdsLidSleep.cycle(&mut e, false);
+        assert_eq!(
+            e.shulkds_lid_sleep,
+            crate::dual_screen::LidSleepMode::InstantResume
         );
         Item::ShulkdsClassicCrafting.cycle(&mut e, false);
         Item::ShulkdsClassicInventory.cycle(&mut e, false);

@@ -169,6 +169,79 @@ impl HotbarPosition {
             Self::TopScreenClassic => "horizon.shulkds.hotbar.classic",
         }
     }
+
+    pub fn compact_label(self) -> &'static str {
+        match self {
+            Self::BottomScreenBottom => "Bottom",
+            Self::BottomScreenTop => "Top",
+            Self::TopScreenClassic => "Classic",
+        }
+    }
+}
+
+/// How dual-screen clamshell handhelds behave when closing the lid or turning screens off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LidSleepMode {
+    #[default]
+    Pause,
+    InstantResume,
+    Off,
+}
+
+impl LidSleepMode {
+    pub const ALL: [Self; 3] = [Self::Pause, Self::InstantResume, Self::Off];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::InstantResume => "resume",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "resume" | "instant" | "instant_resume" | "instant-resume" | "3ds" => {
+                Self::InstantResume
+            }
+            "off" | "false" | "disabled" | "none" => Self::Off,
+            _ => Self::Pause,
+        }
+    }
+
+    pub fn cycle(self, back: bool) -> Self {
+        let idx = Self::ALL.iter().position(|&m| m == self).unwrap_or(0);
+        let next = if back {
+            (idx + Self::ALL.len() - 1) % Self::ALL.len()
+        } else {
+            (idx + 1) % Self::ALL.len()
+        };
+        Self::ALL[next]
+    }
+
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Pause => "Pause Menu",
+            Self::InstantResume => "Instant Resume",
+            Self::Off => "Off",
+        }
+    }
+
+    pub fn compact_label(self) -> &'static str {
+        match self {
+            Self::Pause => "Pause",
+            Self::InstantResume => "Resume",
+            Self::Off => "OFF",
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::Pause => "horizon.shulkds.lid_sleep.pause",
+            Self::InstantResume => "horizon.shulkds.lid_sleep.resume",
+            Self::Off => "horizon.shulkds.lid_sleep.off",
+        }
+    }
 }
 
 /// Compute the GUI scale for the secondary touch display so near-square panels like
@@ -987,5 +1060,24 @@ mod tests {
             HotbarPosition::BottomScreenBottom.cycle(true),
             HotbarPosition::TopScreenClassic
         );
+    }
+
+    #[test]
+    fn test_lid_sleep_mode_round_trip_and_cycle() {
+        for mode in LidSleepMode::ALL {
+            assert_eq!(LidSleepMode::parse(mode.name()), mode);
+        }
+        assert_eq!(LidSleepMode::parse("3ds"), LidSleepMode::InstantResume);
+        assert_eq!(LidSleepMode::parse("disabled"), LidSleepMode::Off);
+        assert_eq!(LidSleepMode::parse("unknown"), LidSleepMode::Pause);
+        assert_eq!(
+            LidSleepMode::Pause.cycle(false),
+            LidSleepMode::InstantResume
+        );
+        assert_eq!(LidSleepMode::InstantResume.cycle(false), LidSleepMode::Off);
+        assert_eq!(LidSleepMode::Off.cycle(false), LidSleepMode::Pause);
+        assert_eq!(LidSleepMode::Pause.cycle(true), LidSleepMode::Off);
+        assert_eq!(LidSleepMode::Pause.compact_label(), "Pause");
+        assert_eq!(LidSleepMode::InstantResume.short_label(), "Instant Resume");
     }
 }

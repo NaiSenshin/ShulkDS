@@ -10,7 +10,7 @@
 
 use super::{Game, Screen, event_loop::EventLoopCtl};
 use horizon_client::{
-    accounts,
+    Result, accounts,
     dual_screen::{BottomPointerAction, PointerButton, ViewportRect},
     gamepad::Button,
     hud::{HudBatch, rgba},
@@ -18,8 +18,8 @@ use horizon_client::{
     multiplayer::{Outcome as MpOutcome, Screen as MpScreen},
     options_ui::Page,
     save::WorldPreset,
-    title::{Action, Mode, WorldEntry, DIFFICULTIES},
-    ui, Result,
+    title::{Action, DIFFICULTIES, Mode, WorldEntry},
+    ui,
 };
 use winit::keyboard::KeyCode;
 
@@ -189,6 +189,7 @@ impl Game<'_> {
 
     fn sync_title_mode_tag(&mut self, tag: u8) {
         if self.shulkds_title.last_mode_tag != tag {
+            self.dismiss_soft_keyboard();
             self.shulkds_title.last_mode_tag = tag;
             self.shulkds_title.pending_row_focus = None;
             self.shulkds_title.drag_start_y = None;
@@ -258,10 +259,24 @@ impl Game<'_> {
         [r[0] - bx, hit_top - by, r[2], (hit_bot - hit_top).max(1.0)]
     }
 
-    fn draw_title_card(&self, batch: &mut HudBatch, [x, y, w, h]: [f32; 4], bg: u32, border: u32, top_accent: Option<u32>) {
+    fn draw_title_card(
+        &self,
+        batch: &mut HudBatch,
+        [x, y, w, h]: [f32; 4],
+        bg: u32,
+        border: u32,
+        top_accent: Option<u32>,
+    ) {
         let a = &self.gui.atlas;
         batch.fill(a, x, y, w, h, border);
-        batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), (h - 2.0).max(0.0), bg);
+        batch.fill(
+            a,
+            x + 1.0,
+            y + 1.0,
+            (w - 2.0).max(0.0),
+            (h - 2.0).max(0.0),
+            bg,
+        );
         batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), 1.0, BORDER_SOFT);
         if let Some(col) = top_accent {
             batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), 2.5, col);
@@ -294,9 +309,20 @@ impl Game<'_> {
         if a.sprites.contains_key(sprite) {
             ui::nine_slice(batch, a, sprite, x, y, w, h, u32::MAX);
         } else {
-            let border = if focused { TEXT_WHITE } else { rgba(160, 160, 160, 255) };
+            let border = if focused {
+                TEXT_WHITE
+            } else {
+                rgba(160, 160, 160, 255)
+            };
             batch.fill(a, x, y, w, h, border);
-            batch.fill(a, x + 1.0, y + 1.0, (w - 2.0).max(0.0), (h - 2.0).max(0.0), rgba(0, 0, 0, 255));
+            batch.fill(
+                a,
+                x + 1.0,
+                y + 1.0,
+                (w - 2.0).max(0.0),
+                (h - 2.0).max(0.0),
+                rgba(0, 0, 0, 255),
+            );
         }
     }
 
@@ -320,11 +346,22 @@ impl Game<'_> {
         };
         let a = &self.gui.atlas;
         if a.sprites.contains_key(sprite) {
-            let tint = if pressed { rgba(210, 210, 210, 255) } else { u32::MAX };
+            let tint = if pressed {
+                rgba(210, 210, 210, 255)
+            } else {
+                u32::MAX
+            };
             ui::nine_slice(batch, a, sprite, rect[0], rect[1], rect[2], rect[3], tint);
             if focused && !hovered {
                 batch.fill(a, rect[0], rect[1], rect[2], 1.0, BORDER_GLOW);
-                batch.fill(a, rect[0], rect[1] + rect[3] - 1.0, rect[2], 1.0, BORDER_GLOW);
+                batch.fill(
+                    a,
+                    rect[0],
+                    rect[1] + rect[3] - 1.0,
+                    rect[2],
+                    1.0,
+                    BORDER_GLOW,
+                );
             }
         } else {
             let bg = if !enabled {
@@ -360,7 +397,12 @@ impl Game<'_> {
         active: bool,
         act: HitAct,
     ) {
-        let focus_ordinal = self.shulkds_title.hits.iter().filter(|h| h.focusable).count();
+        let focus_ordinal = self
+            .shulkds_title
+            .hits
+            .iter()
+            .filter(|h| h.focusable)
+            .count();
         let focused = self.shulkds_title.focus_idx == focus_ordinal && enabled;
         self.shulkds_title.hits.push(HitItem {
             rect: [rect[0] - bx, rect[1] - by, rect[2], rect[3]],
@@ -368,12 +410,15 @@ impl Game<'_> {
             enabled,
             focusable: true,
         });
-        let hovered = enabled && self.hit_under_pointer([rect[0] - bx, rect[1] - by, rect[2], rect[3]]);
+        let hovered =
+            enabled && self.hit_under_pointer([rect[0] - bx, rect[1] - by, rect[2], rect[3]]);
         let pressed = hovered && self.shulkds_title.pointer_down;
         self.draw_official_button(batch, rect, enabled, focused, hovered, active, pressed);
         let a = &self.gui.atlas;
         let tw = HudBatch::text_width(a, label).max(1.0);
-        let scale = ((rect[2] - 8.0).max(8.0) / tw).min((rect[3] - 4.0).max(6.0) / 8.0).clamp(0.55, 1.0);
+        let scale = ((rect[2] - 8.0).max(8.0) / tw)
+            .min((rect[3] - 4.0).max(6.0) / 8.0)
+            .clamp(0.55, 1.0);
         let fg = if !enabled {
             rgba(160, 160, 160, 255)
         } else if active || focused || hovered {
@@ -418,7 +463,11 @@ impl Game<'_> {
         while !s.is_empty() && HudBatch::text_width(a, &format!("{s}..")) * min_scale > max_w {
             s.pop();
         }
-        let out = if s.is_empty() { String::new() } else { format!("{s}..") };
+        let out = if s.is_empty() {
+            String::new()
+        } else {
+            format!("{s}..")
+        };
         (out, min_scale)
     }
 
@@ -457,7 +506,11 @@ impl Game<'_> {
         let kind = self.current_title_kind();
         let show_top_bar = matches!(
             kind,
-            Some(BottomTitleKind::Select | BottomTitleKind::Create | BottomTitleKind::MultiplayerList)
+            Some(
+                BottomTitleKind::Select
+                    | BottomTitleKind::Create
+                    | BottomTitleKind::MultiplayerList
+            )
         );
         self.draw_title_top_vignette(batch, w, h, show_top_bar);
 
@@ -468,7 +521,14 @@ impl Game<'_> {
             let cx = ((w - card_w) * 0.5).floor();
             let cy = ((h - card_h) * 0.5).floor();
             self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
-            batch.fill(&self.gui.atlas, cx + 2.0, cy + 2.0, card_w - 4.0, 2.0, ACCENT_GREEN);
+            batch.fill(
+                &self.gui.atlas,
+                cx + 2.0,
+                cy + 2.0,
+                card_w - 4.0,
+                2.0,
+                ACCENT_GREEN,
+            );
 
             let hdr = if upd.version.is_empty() {
                 upd.stage_title.clone()
@@ -505,7 +565,15 @@ impl Game<'_> {
 
             let inner_w = card_w - 24.0;
             if !upd.highlights.is_empty() {
-                batch.text_scaled(&self.gui.atlas, "Highlights:", cx + 12.0, ly, 0.85, ACCENT_AMBER, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "Highlights:",
+                    cx + 12.0,
+                    ly,
+                    0.85,
+                    ACCENT_AMBER,
+                    true,
+                );
                 ly += 11.0;
                 let max_y = cy + card_h - 14.0;
                 for item in &upd.highlights {
@@ -517,7 +585,15 @@ impl Game<'_> {
                             break;
                         }
                         let s = line.plain();
-                        batch.text_scaled(&self.gui.atlas, &s, cx + 12.0, ly, 0.80, TEXT_WHITE, true);
+                        batch.text_scaled(
+                            &self.gui.atlas,
+                            &s,
+                            cx + 12.0,
+                            ly,
+                            0.80,
+                            TEXT_WHITE,
+                            true,
+                        );
                         ly += 10.0;
                     }
                     ly += 2.0;
@@ -545,7 +621,14 @@ impl Game<'_> {
                 let logo_h = 280.0 * logo_scale * (215.0 / 1024.0);
                 let logo_y = (h * 0.10).floor().max(16.0);
                 if let Some(title) = self.title.as_ref() {
-                    title.draw_logo_and_splash(&self.gui.atlas, batch, logo_cx, logo_y, logo_scale, hide_splash);
+                    title.draw_logo_and_splash(
+                        &self.gui.atlas,
+                        batch,
+                        logo_cx,
+                        logo_y,
+                        logo_scale,
+                        hide_splash,
+                    );
                 }
 
                 // Centered live animated 3D Player Avatar beneath the logo
@@ -567,9 +650,20 @@ impl Game<'_> {
                     horizon_core::VANILLA_VERSION
                 );
                 batch.text_scaled(&self.gui.atlas, &ver, 6.0, h - 11.0, 0.85, TEXT_MUTED, true);
-                let notice = lang::get_or("horizon.title.not_affiliated", "Not affiliated with Mojang or Microsoft");
+                let notice = lang::get_or(
+                    "horizon.title.not_affiliated",
+                    "Not affiliated with Mojang or Microsoft",
+                );
                 let nw = HudBatch::text_width(&self.gui.atlas, &notice) * 0.80;
-                batch.text_scaled(&self.gui.atlas, &notice, w - nw - 6.0, h - 11.0, 0.80, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &notice,
+                    w - nw - 6.0,
+                    h - 11.0,
+                    0.80,
+                    TEXT_MUTED,
+                    true,
+                );
             }
             Some(BottomTitleKind::Select) => {
                 // Auto-select first world so the Hero Showcase card is immediately populated
@@ -587,10 +681,26 @@ impl Game<'_> {
                     return;
                 };
 
-                batch.text_scaled(&self.gui.atlas, "HOME  >  SINGLEPLAYER", 8.0, 5.0, 0.85, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "HOME  >  SINGLEPLAYER",
+                    8.0,
+                    5.0,
+                    0.85,
+                    TEXT_MUTED,
+                    true,
+                );
                 let count_txt = format!("{} Worlds", worlds.len());
                 let cw = HudBatch::text_width(&self.gui.atlas, &count_txt) * 0.85;
-                batch.text_scaled(&self.gui.atlas, &count_txt, w - cw - 8.0, 5.0, 0.85, ACCENT_GREEN, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &count_txt,
+                    w - cw - 8.0,
+                    5.0,
+                    0.85,
+                    ACCENT_GREEN,
+                    true,
+                );
 
                 let card_w = (w - 36.0).min(340.0);
                 let card_h = (h - 68.0).clamp(92.0, 128.0);
@@ -600,40 +710,104 @@ impl Game<'_> {
                 if let Some(idx) = *selected
                     && let Some(world) = worlds.get(idx)
                 {
-                    let (mode_lbl, mode_col) = Self::game_mode_badge(world.game_mode, world.hardcore);
+                    let (mode_lbl, mode_col) =
+                        Self::game_mode_badge(world.game_mode, world.hardcore);
                     self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
 
                     let icon_sz = (card_h - 32.0).clamp(42.0, 58.0);
                     let ix = cx + 14.0;
                     let iy = cy + (card_h - icon_sz) * 0.5;
-                    batch.fill(&self.gui.atlas, ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0, BORDER_DARK);
-                    title.draw_world_icon_at(&self.gui.atlas, batch, world, idx % horizon_client::hud::WORLD_ICON_SLOTS, ix, iy, icon_sz);
+                    batch.fill(
+                        &self.gui.atlas,
+                        ix - 2.0,
+                        iy - 2.0,
+                        icon_sz + 4.0,
+                        icon_sz + 4.0,
+                        BORDER_DARK,
+                    );
+                    title.draw_world_icon_at(
+                        &self.gui.atlas,
+                        batch,
+                        world,
+                        idx % horizon_client::hud::WORLD_ICON_SLOTS,
+                        ix,
+                        iy,
+                        icon_sz,
+                    );
 
                     let tx = ix + icon_sz + 14.0;
                     let tw_avail = (cx + card_w - 12.0 - tx).max(60.0);
                     let (wname, wscale) = self.fit_text_width(&world.name, tw_avail, 1.35);
-                    batch.text_scaled(&self.gui.atlas, &wname, tx, iy + 2.0, wscale, TEXT_WHITE, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &wname,
+                        tx,
+                        iy + 2.0,
+                        wscale,
+                        TEXT_WHITE,
+                        true,
+                    );
 
                     // Pills: Game mode + Commands
                     let pill_y = iy + 20.0;
                     let mpw = HudBatch::text_width(&self.gui.atlas, mode_lbl) * 0.85 + 10.0;
-                    self.draw_title_card(batch, [tx, pill_y, mpw, 13.0], rgba(36, 36, 38, 240), mode_col, None);
-                    batch.text_scaled(&self.gui.atlas, mode_lbl, tx + 5.0, pill_y + 3.0, 0.85, mode_col, true);
+                    self.draw_title_card(
+                        batch,
+                        [tx, pill_y, mpw, 13.0],
+                        rgba(36, 36, 38, 240),
+                        mode_col,
+                        None,
+                    );
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        mode_lbl,
+                        tx + 5.0,
+                        pill_y + 3.0,
+                        0.85,
+                        mode_col,
+                        true,
+                    );
 
                     if world.commands {
                         let cmd_x = tx + mpw + 5.0;
                         let cmd_lbl = "Commands";
                         let cmw = HudBatch::text_width(&self.gui.atlas, cmd_lbl) * 0.82 + 10.0;
                         if cmd_x + cmw < cx + card_w - 8.0 {
-                            self.draw_title_card(batch, [cmd_x, pill_y, cmw, 13.0], rgba(36, 36, 38, 240), BORDER_SOFT, None);
-                            batch.text_scaled(&self.gui.atlas, cmd_lbl, cmd_x + 5.0, pill_y + 3.0, 0.82, TEXT_MUTED, true);
+                            self.draw_title_card(
+                                batch,
+                                [cmd_x, pill_y, cmw, 13.0],
+                                rgba(36, 36, 38, 240),
+                                BORDER_SOFT,
+                                None,
+                            );
+                            batch.text_scaled(
+                                &self.gui.atlas,
+                                cmd_lbl,
+                                cmd_x + 5.0,
+                                pill_y + 3.0,
+                                0.82,
+                                TEXT_MUTED,
+                                true,
+                            );
                         }
                     }
 
                     let date: chrono::DateTime<chrono::Local> = world.modified.into();
-                    let meta = format!("Folder: {}  ·  {}", world.folder, date.format("%Y-%m-%d %H:%M"));
+                    let meta = format!(
+                        "Folder: {}  ·  {}",
+                        world.folder,
+                        date.format("%Y-%m-%d %H:%M")
+                    );
                     let (meta_fit, ms) = self.fit_text_width(&meta, tw_avail, 0.82);
-                    batch.text_scaled(&self.gui.atlas, &meta_fit, tx, pill_y + 19.0, ms, TEXT_MUTED, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &meta_fit,
+                        tx,
+                        pill_y + 19.0,
+                        ms,
+                        TEXT_MUTED,
+                        true,
+                    );
 
                     let status_line = if world.corrupted {
                         ("Corrupted level data (tap Play to recover)", ACCENT_RED)
@@ -645,19 +819,53 @@ impl Game<'_> {
                     } else if world.file_fixing || world.downgrade {
                         ("World needs upgrade/backup", ACCENT_AMBER)
                     } else {
-                        (&*format!("Minecraft {}", if world.version.is_empty() { horizon_core::VANILLA_VERSION } else { &world.version }), TEXT_MUTED)
+                        (
+                            &*format!(
+                                "Minecraft {}",
+                                if world.version.is_empty() {
+                                    horizon_core::VANILLA_VERSION
+                                } else {
+                                    &world.version
+                                }
+                            ),
+                            TEXT_MUTED,
+                        )
                     };
                     let (st_fit, ss) = self.fit_text_width(status_line.0, tw_avail, 0.82);
-                    batch.text_scaled(&self.gui.atlas, &st_fit, tx, pill_y + 31.0, ss, status_line.1, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &st_fit,
+                        tx,
+                        pill_y + 31.0,
+                        ss,
+                        status_line.1,
+                        true,
+                    );
                 } else {
                     self.draw_stone_panel(batch, [cx, cy, card_w, 72.0]);
                     let msg = "No worlds yet — tap + New below to begin";
                     let mw = HudBatch::text_width(&self.gui.atlas, msg) * 0.95;
-                    batch.text_scaled(&self.gui.atlas, msg, cx + (card_w - mw) * 0.5, cy + 32.0, 0.95, TEXT_WHITE, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        msg,
+                        cx + (card_w - mw) * 0.5,
+                        cy + 32.0,
+                        0.95,
+                        TEXT_WHITE,
+                        true,
+                    );
                 }
                 let hint = "Select a world below, or double-tap to launch";
                 let hw = HudBatch::text_width(&self.gui.atlas, hint) * 0.82;
-                batch.text_scaled(&self.gui.atlas, hint, (w - hw) * 0.5, h - 11.0, 0.82, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    hint,
+                    (w - hw) * 0.5,
+                    h - 11.0,
+                    0.82,
+                    TEXT_MUTED,
+                    true,
+                );
             }
             Some(BottomTitleKind::Create) => {
                 let Some(title) = self.title.as_ref() else {
@@ -673,11 +881,23 @@ impl Game<'_> {
                 else {
                     return;
                 };
-                batch.text_scaled(&self.gui.atlas, "HOME  >  SINGLEPLAYER  >  CREATE WORLD", 8.0, 5.0, 0.85, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "HOME  >  SINGLEPLAYER  >  CREATE WORLD",
+                    8.0,
+                    5.0,
+                    0.85,
+                    TEXT_MUTED,
+                    true,
+                );
 
-                let (mode_lbl, mode_col) = Self::game_mode_badge(if *creative { 1 } else { 0 }, options.hardcore);
+                let (mode_lbl, mode_col) =
+                    Self::game_mode_badge(if *creative { 1 } else { 0 }, options.hardcore);
                 let diff_idx = options.difficulty().min(DIFFICULTIES.len() - 1);
-                let diff_lbl = lang::get_or(&format!("options.difficulty.{}", DIFFICULTIES[diff_idx]), DIFFICULTIES[diff_idx]);
+                let diff_lbl = lang::get_or(
+                    &format!("options.difficulty.{}", DIFFICULTIES[diff_idx]),
+                    DIFFICULTIES[diff_idx],
+                );
                 let preset_lbl = Self::world_preset_label(options.world_type);
 
                 let card_w = (w - 40.0).min(336.0);
@@ -686,38 +906,122 @@ impl Game<'_> {
                 let cy = ((h - card_h) * 0.5).floor();
                 self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
 
-                let disp_name = if name.trim().is_empty() { "New World" } else { name.as_str() };
+                let disp_name = if name.trim().is_empty() {
+                    "New World"
+                } else {
+                    name.as_str()
+                };
                 let (nm_fit, ns) = self.fit_text_width(disp_name, card_w - 28.0, 1.40);
-                batch.text_scaled(&self.gui.atlas, &nm_fit, cx + 14.0, cy + 12.0, ns, TEXT_WHITE, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &nm_fit,
+                    cx + 14.0,
+                    cy + 12.0,
+                    ns,
+                    TEXT_WHITE,
+                    true,
+                );
 
                 let badge_y = cy + 32.0;
                 let bw1 = HudBatch::text_width(&self.gui.atlas, mode_lbl) * 0.85 + 12.0;
-                self.draw_title_card(batch, [cx + 14.0, badge_y, bw1, 14.0], rgba(36, 36, 38, 240), mode_col, None);
-                batch.text_scaled(&self.gui.atlas, mode_lbl, cx + 20.0, badge_y + 3.0, 0.85, mode_col, true);
+                self.draw_title_card(
+                    batch,
+                    [cx + 14.0, badge_y, bw1, 14.0],
+                    rgba(36, 36, 38, 240),
+                    mode_col,
+                    None,
+                );
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    mode_lbl,
+                    cx + 20.0,
+                    badge_y + 3.0,
+                    0.85,
+                    mode_col,
+                    true,
+                );
 
                 let bw2 = HudBatch::text_width(&self.gui.atlas, &diff_lbl) * 0.85 + 12.0;
-                self.draw_title_card(batch, [cx + 18.0 + bw1, badge_y, bw2, 14.0], rgba(36, 36, 38, 240), BORDER_SOFT, None);
-                batch.text_scaled(&self.gui.atlas, &diff_lbl, cx + 24.0 + bw1, badge_y + 3.0, 0.85, TEXT_WHITE, true);
+                self.draw_title_card(
+                    batch,
+                    [cx + 18.0 + bw1, badge_y, bw2, 14.0],
+                    rgba(36, 36, 38, 240),
+                    BORDER_SOFT,
+                    None,
+                );
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &diff_lbl,
+                    cx + 24.0 + bw1,
+                    badge_y + 3.0,
+                    0.85,
+                    TEXT_WHITE,
+                    true,
+                );
 
                 let seed_txt = if seed.trim().is_empty() {
                     "Seed: Random".to_owned()
                 } else {
                     format!("Seed: {}", seed.trim())
                 };
-                batch.text_scaled(&self.gui.atlas, &format!("World Type: {preset_lbl}"), cx + 14.0, cy + 54.0, 0.90, TEXT_WHITE, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &format!("World Type: {preset_lbl}"),
+                    cx + 14.0,
+                    cy + 54.0,
+                    0.90,
+                    TEXT_WHITE,
+                    true,
+                );
                 let (sd_fit, ss) = self.fit_text_width(&seed_txt, card_w - 28.0, 0.88);
-                batch.text_scaled(&self.gui.atlas, &sd_fit, cx + 14.0, cy + 67.0, ss, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &sd_fit,
+                    cx + 14.0,
+                    cy + 67.0,
+                    ss,
+                    TEXT_MUTED,
+                    true,
+                );
 
-                let cmds = if options.commands(*creative) { "Commands: ON" } else { "Commands: OFF" };
-                let structs = if options.structures { "Structures: ON" } else { "Structures: OFF" };
-                let bonus = if options.bonus_chest() { "Bonus Chest" } else { "No Bonus" };
+                let cmds = if options.commands(*creative) {
+                    "Commands: ON"
+                } else {
+                    "Commands: OFF"
+                };
+                let structs = if options.structures {
+                    "Structures: ON"
+                } else {
+                    "Structures: OFF"
+                };
+                let bonus = if options.bonus_chest() {
+                    "Bonus Chest"
+                } else {
+                    "No Bonus"
+                };
                 let flags = format!("{cmds}  ·  {structs}  ·  {bonus}");
                 let (fl_fit, fs) = self.fit_text_width(&flags, card_w - 28.0, 0.82);
-                batch.text_scaled(&self.gui.atlas, &fl_fit, cx + 14.0, cy + card_h - 19.0, fs, ACCENT_BLUE, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &fl_fit,
+                    cx + 14.0,
+                    cy + card_h - 19.0,
+                    fs,
+                    ACCENT_BLUE,
+                    true,
+                );
 
                 let hint = "Configure options on the bottom touch screen";
                 let hw = HudBatch::text_width(&self.gui.atlas, hint) * 0.82;
-                batch.text_scaled(&self.gui.atlas, hint, (w - hw) * 0.5, h - 11.0, 0.82, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    hint,
+                    (w - hw) * 0.5,
+                    h - 11.0,
+                    0.82,
+                    TEXT_MUTED,
+                    true,
+                );
             }
             Some(BottomTitleKind::MultiplayerList) => {
                 if let Some(title) = self.title.as_mut()
@@ -737,10 +1041,26 @@ impl Game<'_> {
                 let summaries = screen.list_summaries();
                 let sel = screen.selected_row();
 
-                batch.text_scaled(&self.gui.atlas, "HOME  >  MULTIPLAYER", 8.0, 5.0, 0.85, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "HOME  >  MULTIPLAYER",
+                    8.0,
+                    5.0,
+                    0.85,
+                    TEXT_MUTED,
+                    true,
+                );
                 let scan_lbl = format!("{} Listed", summaries.len());
                 let sw = HudBatch::text_width(&self.gui.atlas, &scan_lbl) * 0.85;
-                batch.text_scaled(&self.gui.atlas, &scan_lbl, w - sw - 8.0, 5.0, 0.85, ACCENT_BLUE, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &scan_lbl,
+                    w - sw - 8.0,
+                    5.0,
+                    0.85,
+                    ACCENT_BLUE,
+                    true,
+                );
 
                 let card_w = (w - 36.0).min(340.0);
                 let card_h = (h - 68.0).clamp(92.0, 126.0);
@@ -764,13 +1084,28 @@ impl Game<'_> {
                     let icon_sz = (card_h - 32.0).clamp(42.0, 58.0);
                     let ix = cx + 14.0;
                     let iy = cy + (card_h - icon_sz) * 0.5;
-                    batch.fill(&self.gui.atlas, ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0, BORDER_DARK);
+                    batch.fill(
+                        &self.gui.atlas,
+                        ix - 2.0,
+                        iy - 2.0,
+                        icon_sz + 4.0,
+                        icon_sz + 4.0,
+                        BORDER_DARK,
+                    );
                     screen.draw_row_icon(&self.gui.atlas, batch, idx, ix, iy, icon_sz);
 
                     let tx = ix + icon_sz + 14.0;
                     let tw_avail = (cx + card_w - 12.0 - tx).max(60.0);
                     let (sname, sscale) = self.fit_text_width(&srv.name, tw_avail, 1.35);
-                    batch.text_scaled(&self.gui.atlas, &sname, tx, iy + 2.0, sscale, TEXT_WHITE, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &sname,
+                        tx,
+                        iy + 2.0,
+                        sscale,
+                        TEXT_WHITE,
+                        true,
+                    );
 
                     let status_txt = if srv.is_lan {
                         "LAN Game".to_owned()
@@ -785,32 +1120,86 @@ impl Game<'_> {
                     };
                     let pill_y = iy + 20.0;
                     let spw = HudBatch::text_width(&self.gui.atlas, &status_txt) * 0.85 + 10.0;
-                    self.draw_title_card(batch, [tx, pill_y, spw, 13.0], rgba(36, 36, 38, 240), accent, None);
-                    batch.text_scaled(&self.gui.atlas, &status_txt, tx + 5.0, pill_y + 3.0, 0.85, accent, true);
+                    self.draw_title_card(
+                        batch,
+                        [tx, pill_y, spw, 13.0],
+                        rgba(36, 36, 38, 240),
+                        accent,
+                        None,
+                    );
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &status_txt,
+                        tx + 5.0,
+                        pill_y + 3.0,
+                        0.85,
+                        accent,
+                        true,
+                    );
 
                     if let Some((online, max)) = srv.players {
                         let p_txt = format!("{online}/{max} players");
                         let px_pos = tx + spw + 6.0;
-                        batch.text_scaled(&self.gui.atlas, &p_txt, px_pos, pill_y + 3.0, 0.85, TEXT_WHITE, true);
+                        batch.text_scaled(
+                            &self.gui.atlas,
+                            &p_txt,
+                            px_pos,
+                            pill_y + 3.0,
+                            0.85,
+                            TEXT_WHITE,
+                            true,
+                        );
                     }
 
                     let motd_clean = srv.motd.replace('\n', " ");
                     let (motd_fit, ms) = self.fit_text_width(&motd_clean, tw_avail, 0.82);
-                    batch.text_scaled(&self.gui.atlas, &motd_fit, tx, pill_y + 19.0, ms, TEXT_MUTED, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &motd_fit,
+                        tx,
+                        pill_y + 19.0,
+                        ms,
+                        TEXT_MUTED,
+                        true,
+                    );
 
                     if !self.settings.file.bool("hideServerAddress") {
                         let (addr_fit, as_s) = self.fit_text_width(&srv.address, tw_avail, 0.80);
-                        batch.text_scaled(&self.gui.atlas, &addr_fit, tx, pill_y + 31.0, as_s, TEXT_MUTED, true);
+                        batch.text_scaled(
+                            &self.gui.atlas,
+                            &addr_fit,
+                            tx,
+                            pill_y + 31.0,
+                            as_s,
+                            TEXT_MUTED,
+                            true,
+                        );
                     }
                 } else {
                     self.draw_stone_panel(batch, [cx, cy, card_w, 72.0]);
                     let msg = "No servers saved — tap + Add or Direct below";
                     let mw = HudBatch::text_width(&self.gui.atlas, msg) * 0.92;
-                    batch.text_scaled(&self.gui.atlas, msg, cx + (card_w - mw) * 0.5, cy + 32.0, 0.92, TEXT_WHITE, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        msg,
+                        cx + (card_w - mw) * 0.5,
+                        cy + 32.0,
+                        0.92,
+                        TEXT_WHITE,
+                        true,
+                    );
                 }
                 let hint = "Select a server below or tap Direct Connection";
                 let hw = HudBatch::text_width(&self.gui.atlas, hint) * 0.82;
-                batch.text_scaled(&self.gui.atlas, hint, (w - hw) * 0.5, h - 11.0, 0.82, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    hint,
+                    (w - hw) * 0.5,
+                    h - 11.0,
+                    0.82,
+                    TEXT_MUTED,
+                    true,
+                );
             }
             Some(BottomTitleKind::MultiplayerWarning) => {
                 let card_w = (w - 48.0).min(336.0);
@@ -818,9 +1207,20 @@ impl Game<'_> {
                 let cx = ((w - card_w) * 0.5).floor();
                 let cy = ((h - card_h) * 0.5).floor();
                 self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
-                let hdr = lang::get_or("multiplayerWarning.header", "Caution: Third-Party Online Play");
+                let hdr = lang::get_or(
+                    "multiplayerWarning.header",
+                    "Caution: Third-Party Online Play",
+                );
                 let hw = HudBatch::text_width(&self.gui.atlas, &hdr) * 1.05;
-                batch.text_scaled(&self.gui.atlas, &hdr, cx + (card_w - hw) * 0.5, cy + 12.0, 1.05, ACCENT_AMBER, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &hdr,
+                    cx + (card_w - hw) * 0.5,
+                    cy + 12.0,
+                    1.05,
+                    ACCENT_AMBER,
+                    true,
+                );
                 let msg = lang::get_or(
                     "multiplayerWarning.message",
                     "Online play is offered by third-party servers that are not owned, operated, or supervised by Mojang Studios or Microsoft.",
@@ -829,7 +1229,15 @@ impl Game<'_> {
                 let lines = self.gui.atlas.font.split(&msg_text, (card_w - 24.0) / 0.85);
                 for (i, line) in lines.into_iter().take(5).enumerate() {
                     let s = line.plain();
-                    batch.text_scaled(&self.gui.atlas, &s, cx + 12.0, cy + 30.0 + i as f32 * 10.0, 0.85, TEXT_WHITE, true);
+                    batch.text_scaled(
+                        &self.gui.atlas,
+                        &s,
+                        cx + 12.0,
+                        cy + 30.0 + i as f32 * 10.0,
+                        0.85,
+                        TEXT_WHITE,
+                        true,
+                    );
                 }
             }
             _ => {}
@@ -905,8 +1313,12 @@ impl Game<'_> {
             BottomTitleKind::Main => self.draw_bottom_title_main(batch, bx, by, bw, bh),
             BottomTitleKind::Select => self.draw_bottom_title_select(batch, bx, by, bw, bh),
             BottomTitleKind::Create => self.draw_bottom_title_create(batch, bx, by, bw, bh),
-            BottomTitleKind::MultiplayerList => self.draw_bottom_title_multiplayer(batch, bx, by, bw, bh),
-            BottomTitleKind::MultiplayerWarning => self.draw_bottom_title_warning(batch, bx, by, bw, bh),
+            BottomTitleKind::MultiplayerList => {
+                self.draw_bottom_title_multiplayer(batch, bx, by, bw, bh)
+            }
+            BottomTitleKind::MultiplayerWarning => {
+                self.draw_bottom_title_warning(batch, bx, by, bw, bh)
+            }
             BottomTitleKind::Options => self.draw_bottom_title_options(batch, bx, by, bw, bh),
             BottomTitleKind::DetailModal => self.draw_bottom_title_modal(batch, bx, by, bw, bh),
         }
@@ -921,10 +1333,19 @@ impl Game<'_> {
         let hdr_y = by + 6.0;
         let hdr_h = 16.0;
         let ver_hdr = format!("Minecraft {}", horizon_core::VANILLA_VERSION);
-        batch.text_scaled(&self.gui.atlas, &ver_hdr, ix + 2.0, hdr_y + 6.0, 0.92, TEXT_MUTED, true);
+        batch.text_scaled(
+            &self.gui.atlas,
+            &ver_hdr,
+            ix + 2.0,
+            hdr_y + 6.0,
+            0.92,
+            TEXT_MUTED,
+            true,
+        );
         let player_name = self.worlds_name();
         let prof_lbl = format!("Profile: {player_name}");
-        let prof_w = (HudBatch::text_width(&self.gui.atlas, &prof_lbl) * 0.80 + 16.0).clamp(76.0, iw * 0.62);
+        let prof_w =
+            (HudBatch::text_width(&self.gui.atlas, &prof_lbl) * 0.80 + 16.0).clamp(76.0, iw * 0.62);
         self.draw_title_pill_btn(
             batch,
             bx,
@@ -982,7 +1403,11 @@ impl Game<'_> {
             by,
             [ix + col_w + gap, cards_y, col2_w, row1_h],
             &mp_title,
-            if allows_mp { "Servers & LAN" } else { "Multiplayer Disabled" },
+            if allows_mp {
+                "Servers & LAN"
+            } else {
+                "Multiplayer Disabled"
+            },
             ACCENT_BLUE,
             Some("item/ender_eye"),
             false,
@@ -1020,10 +1445,50 @@ impl Game<'_> {
         let u_gap = 4.0;
         let uw = ((iw - u_gap * 3.0) / 4.0).floor();
         let last_uw = (iw - (uw + u_gap) * 3.0).max(uw);
-        self.draw_title_pill_btn(batch, bx, by, [ix, util_y, uw, util_h], "Language", None, true, false, HitAct::MainLanguage);
-        self.draw_title_pill_btn(batch, bx, by, [ix + uw + u_gap, util_y, uw, util_h], "Access.", None, true, false, HitAct::MainAccess);
-        self.draw_title_pill_btn(batch, bx, by, [ix + (uw + u_gap) * 2.0, util_y, uw, util_h], "Credits", None, true, false, HitAct::MainCredits);
-        self.draw_title_pill_btn(batch, bx, by, [ix + (uw + u_gap) * 3.0, util_y, last_uw, util_h], "Quit", Some(ACCENT_RED), true, false, HitAct::MainQuit);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, util_y, uw, util_h],
+            "Language",
+            None,
+            true,
+            false,
+            HitAct::MainLanguage,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + uw + u_gap, util_y, uw, util_h],
+            "Access.",
+            None,
+            true,
+            false,
+            HitAct::MainAccess,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + (uw + u_gap) * 2.0, util_y, uw, util_h],
+            "Credits",
+            None,
+            true,
+            false,
+            HitAct::MainCredits,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + (uw + u_gap) * 3.0, util_y, last_uw, util_h],
+            "Quit",
+            Some(ACCENT_RED),
+            true,
+            false,
+            HitAct::MainQuit,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1041,7 +1506,12 @@ impl Game<'_> {
         enabled: bool,
         act: HitAct,
     ) {
-        let focus_ordinal = self.shulkds_title.hits.iter().filter(|h| h.focusable).count();
+        let focus_ordinal = self
+            .shulkds_title
+            .hits
+            .iter()
+            .filter(|h| h.focusable)
+            .count();
         let focused = self.shulkds_title.focus_idx == focus_ordinal && enabled;
         self.shulkds_title.hits.push(HitItem {
             rect: [rect[0] - bx, rect[1] - by, rect[2], rect[3]],
@@ -1049,7 +1519,8 @@ impl Game<'_> {
             enabled,
             focusable: true,
         });
-        let hovered = enabled && self.hit_under_pointer([rect[0] - bx, rect[1] - by, rect[2], rect[3]]);
+        let hovered =
+            enabled && self.hit_under_pointer([rect[0] - bx, rect[1] - by, rect[2], rect[3]]);
         let pressed = hovered && self.shulkds_title.pointer_down;
         self.draw_official_button(batch, rect, enabled, focused, hovered, false, pressed);
 
@@ -1070,11 +1541,35 @@ impl Game<'_> {
             }
         });
         if let Some(sp) = sprite_key {
-            self.draw_title_card(batch, [ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0], rgba(16, 16, 20, 150), rgba(0, 0, 0, 175), None);
-            batch.sprite_scaled(&self.gui.atlas, sp, ix, iy, icon_sz, icon_sz, if enabled { u32::MAX } else { rgba(140, 140, 140, 180) });
+            self.draw_title_card(
+                batch,
+                [ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0],
+                rgba(16, 16, 20, 150),
+                rgba(0, 0, 0, 175),
+                None,
+            );
+            batch.sprite_scaled(
+                &self.gui.atlas,
+                sp,
+                ix,
+                iy,
+                icon_sz,
+                icon_sz,
+                if enabled {
+                    u32::MAX
+                } else {
+                    rgba(140, 140, 140, 180)
+                },
+            );
             text_x = ix + icon_sz + 8.0;
         } else if gear_icon {
-            self.draw_title_card(batch, [ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0], rgba(16, 16, 20, 150), rgba(0, 0, 0, 175), None);
+            self.draw_title_card(
+                batch,
+                [ix - 2.0, iy - 2.0, icon_sz + 4.0, icon_sz + 4.0],
+                rgba(16, 16, 20, 150),
+                rgba(0, 0, 0, 175),
+                None,
+            );
             self.draw_3ds_options_icon(batch, ix, iy, icon_sz);
             text_x = ix + icon_sz + 8.0;
         }
@@ -1097,10 +1592,25 @@ impl Game<'_> {
             rgba(214, 218, 228, 255)
         };
         batch.text_scaled(&self.gui.atlas, &t_fit, text_x, ty0, ts, fg, true);
-        batch.text_scaled(&self.gui.atlas, &s_fit, text_x, ty0 + 8.0 * ts + 3.0, ss, sub_fg, true);
+        batch.text_scaled(
+            &self.gui.atlas,
+            &s_fit,
+            text_x,
+            ty0 + 8.0 * ts + 3.0,
+            ss,
+            sub_fg,
+            true,
+        );
     }
 
-    fn draw_bottom_title_select(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_select(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let pad = 8.0;
         let ix = bx + pad;
         let iw = (bw - pad * 2.0).max(80.0);
@@ -1108,11 +1618,38 @@ impl Game<'_> {
         // Header: [< Back]  Singleplayer  [+ New]
         let hdr_y = by + 6.0;
         let hdr_h = 16.0;
-        self.draw_title_pill_btn(batch, bx, by, [ix, hdr_y, 54.0, hdr_h], "< Back", None, true, false, HitAct::BackToMain);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, hdr_y, 54.0, hdr_h],
+            "< Back",
+            None,
+            true,
+            false,
+            HitAct::BackToMain,
+        );
         let hdr = lang::get_or("menu.singleplayer", "Singleplayer");
         let hw = HudBatch::text_width(&self.gui.atlas, &hdr);
-        batch.text(&self.gui.atlas, &hdr, ix + (iw - hw) * 0.5, hdr_y + 4.0, TEXT_WHITE, true);
-        self.draw_title_pill_btn(batch, bx, by, [ix + iw - 58.0, hdr_y, 58.0, hdr_h], "+ New", Some(ACCENT_GREEN), true, false, HitAct::SelectCreate);
+        batch.text(
+            &self.gui.atlas,
+            &hdr,
+            ix + (iw - hw) * 0.5,
+            hdr_y + 4.0,
+            TEXT_WHITE,
+            true,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + iw - 58.0, hdr_y, 58.0, hdr_h],
+            "+ New",
+            Some(ACCENT_GREEN),
+            true,
+            false,
+            HitAct::SelectCreate,
+        );
 
         let dock_h = 18.0;
         let dock_y = by + bh - dock_h - 8.0;
@@ -1146,14 +1683,27 @@ impl Game<'_> {
             self.draw_stone_panel(batch, [ix, list_y, list_w, 40.0]);
             let msg = "No worlds saved — tap + New to create one";
             let mw = HudBatch::text_width(&self.gui.atlas, msg) * 0.85;
-            batch.text_scaled(&self.gui.atlas, msg, ix + (list_w - mw) * 0.5, list_y + 16.0, 0.85, TEXT_MUTED, true);
+            batch.text_scaled(
+                &self.gui.atlas,
+                msg,
+                ix + (list_w - mw) * 0.5,
+                list_y + 16.0,
+                0.85,
+                TEXT_MUTED,
+                true,
+            );
         } else {
             for (i, (world, is_sel)) in worlds_snapshot.iter().enumerate() {
                 let ry = list_y + i as f32 * row_step - self.shulkds_title.world_scroll;
                 if ry + row_h < list_y || ry > list_y + list_h {
                     continue;
                 }
-                let focus_ord = self.shulkds_title.hits.iter().filter(|h| h.focusable).count();
+                let focus_ord = self
+                    .shulkds_title
+                    .hits
+                    .iter()
+                    .filter(|h| h.focusable)
+                    .count();
                 if self.shulkds_title.pending_row_focus == Some(i) {
                     self.shulkds_title.focus_idx = focus_ord;
                     self.shulkds_title.pending_row_focus = None;
@@ -1173,16 +1723,39 @@ impl Game<'_> {
 
                 let icon_sz = 22.0;
                 if let Some(title) = self.title.as_ref() {
-                    title.draw_world_icon_at(&self.gui.atlas, batch, world, i % horizon_client::hud::WORLD_ICON_SLOTS, ix + 8.0, ry + 4.0, icon_sz);
+                    title.draw_world_icon_at(
+                        &self.gui.atlas,
+                        batch,
+                        world,
+                        i % horizon_client::hud::WORLD_ICON_SLOTS,
+                        ix + 8.0,
+                        ry + 4.0,
+                        icon_sz,
+                    );
                 }
                 let tx = ix + 35.0;
                 let avail = (ix + list_w - 8.0 - tx).max(30.0);
                 let (wname, ws) = self.fit_text_width(&world.name, avail, 0.96);
                 batch.text_scaled(&self.gui.atlas, &wname, tx, ry + 5.0, ws, TEXT_WHITE, true);
                 let (m_lbl, _) = Self::game_mode_badge(world.game_mode, world.hardcore);
-                let sub = format!("{m_lbl} · {}", if world.version.is_empty() { horizon_core::VANILLA_VERSION } else { &world.version });
+                let sub = format!(
+                    "{m_lbl} · {}",
+                    if world.version.is_empty() {
+                        horizon_core::VANILLA_VERSION
+                    } else {
+                        &world.version
+                    }
+                );
                 let (sub_fit, ss) = self.fit_text_width(&sub, avail, 0.78);
-                batch.text_scaled(&self.gui.atlas, &sub_fit, tx, ry + 17.0, ss, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &sub_fit,
+                    tx,
+                    ry + 17.0,
+                    ss,
+                    TEXT_MUTED,
+                    true,
+                );
             }
         }
         batch.clip_since(clip_start, ix, list_y, ix + list_w, list_y + list_h);
@@ -1190,28 +1763,104 @@ impl Game<'_> {
         // Scrollbar
         if max_scroll > 0.0 {
             let sb_x = ix + iw - 4.0;
-            batch.fill(&self.gui.atlas, sb_x, list_y, 3.0, list_h, rgba(18, 18, 20, 220));
+            batch.fill(
+                &self.gui.atlas,
+                sb_x,
+                list_y,
+                3.0,
+                list_h,
+                rgba(18, 18, 20, 220),
+            );
             let thumb_h = ((list_h / content_h) * list_h).clamp(16.0, list_h);
-            let thumb_y = list_y + (self.shulkds_title.world_scroll / max_scroll) * (list_h - thumb_h);
-            batch.fill(&self.gui.atlas, sb_x, thumb_y, 3.0, thumb_h, rgba(164, 164, 170, 255));
+            let thumb_y =
+                list_y + (self.shulkds_title.world_scroll / max_scroll) * (list_h - thumb_h);
+            batch.fill(
+                &self.gui.atlas,
+                sb_x,
+                thumb_y,
+                3.0,
+                thumb_h,
+                rgba(164, 164, 170, 255),
+            );
         }
 
         // Action dock: [Play World] [Edit] [Copy] [Del]
         let sel_world = worlds_snapshot.iter().find(|(_, s)| *s).map(|(w, _)| w);
         let can_play = sel_world.is_some_and(WorldEntry::can_play);
         let can_edit = sel_world.is_some_and(WorldEntry::can_edit);
-        let play_lbl = if sel_world.is_some_and(|w| w.corrupted) { "Recover" } else { "Play World" };
+        let play_lbl = if sel_world.is_some_and(|w| w.corrupted) {
+            "Recover"
+        } else {
+            "Play World"
+        };
 
         let d_gap = 4.0;
         let small_w = ((iw - d_gap * 3.0) * 0.175).floor().clamp(36.0, 54.0);
         let play_w = (iw - small_w * 3.0 - d_gap * 3.0).max(60.0);
-        self.draw_title_pill_btn(batch, bx, by, [ix, dock_y, play_w, dock_h], play_lbl, Some(ACCENT_GREEN), can_play, false, HitAct::SelectPlay);
-        self.draw_title_pill_btn(batch, bx, by, [ix + play_w + d_gap, dock_y, small_w, dock_h], "Edit", None, can_edit, false, HitAct::SelectEdit);
-        self.draw_title_pill_btn(batch, bx, by, [ix + play_w + d_gap + small_w + d_gap, dock_y, small_w, dock_h], "Copy", None, can_edit, false, HitAct::SelectCopy);
-        self.draw_title_pill_btn(batch, bx, by, [ix + play_w + d_gap + (small_w + d_gap) * 2.0, dock_y, small_w, dock_h], "Del", Some(ACCENT_RED), sel_world.is_some(), false, HitAct::SelectDelete);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, dock_y, play_w, dock_h],
+            play_lbl,
+            Some(ACCENT_GREEN),
+            can_play,
+            false,
+            HitAct::SelectPlay,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + play_w + d_gap, dock_y, small_w, dock_h],
+            "Edit",
+            None,
+            can_edit,
+            false,
+            HitAct::SelectEdit,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [
+                ix + play_w + d_gap + small_w + d_gap,
+                dock_y,
+                small_w,
+                dock_h,
+            ],
+            "Copy",
+            None,
+            can_edit,
+            false,
+            HitAct::SelectCopy,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [
+                ix + play_w + d_gap + (small_w + d_gap) * 2.0,
+                dock_y,
+                small_w,
+                dock_h,
+            ],
+            "Del",
+            Some(ACCENT_RED),
+            sel_world.is_some(),
+            false,
+            HitAct::SelectDelete,
+        );
     }
 
-    fn draw_bottom_title_create(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_create(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let pad = 8.0;
         let ix = bx + pad;
         let iw = (bw - pad * 2.0).max(80.0);
@@ -1225,7 +1874,13 @@ impl Game<'_> {
                 options,
             } = &title.mode
         {
-            (name.clone(), seed.clone(), *creative, *focus, options.clone())
+            (
+                name.clone(),
+                seed.clone(),
+                *creative,
+                *focus,
+                options.clone(),
+            )
         } else {
             return;
         };
@@ -1234,20 +1889,38 @@ impl Game<'_> {
         let hdr_y = by + 6.0;
         let hdr_h = 16.0;
         let back_w = 26.0;
-        self.draw_title_pill_btn(batch, bx, by, [ix, hdr_y, back_w, hdr_h], "<", None, true, false, HitAct::CreateButton(22));
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, hdr_y, back_w, hdr_h],
+            "<",
+            None,
+            true,
+            false,
+            HitAct::CreateButton(22),
+        );
         let tab_area_x = ix + back_w + 4.0;
         let tab_area_w = (iw - back_w - 4.0).max(60.0);
         let tab_w = ((tab_area_w - 6.0) / 3.0).floor();
         let tab_labels = ["Game", "World", "More"];
         for (ti, lbl) in tab_labels.iter().enumerate() {
-            let tw = if ti == 2 { tab_area_w - (tab_w + 3.0) * 2.0 } else { tab_w };
+            let tw = if ti == 2 {
+                tab_area_w - (tab_w + 3.0) * 2.0
+            } else {
+                tab_w
+            };
             self.draw_title_pill_btn(
                 batch,
                 bx,
                 by,
                 [tab_area_x + ti as f32 * (tab_w + 3.0), hdr_y, tw, hdr_h],
                 lbl,
-                if options.tab == ti { Some(ACCENT_GREEN) } else { None },
+                if options.tab == ti {
+                    Some(ACCENT_GREEN)
+                } else {
+                    None
+                },
                 true,
                 options.tab == ti,
                 HitAct::CreateTab(ti),
@@ -1265,28 +1938,86 @@ impl Game<'_> {
                 let content_h = 4.0 * row_h + 26.0;
                 let y0 = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
                 // World Name field (tap focuses & triggers Android keyboard)
-                batch.text_scaled(&self.gui.atlas, "World Name", ix, y0, 0.80, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "World Name",
+                    ix,
+                    y0,
+                    0.80,
+                    TEXT_MUTED,
+                    true,
+                );
                 let name_y = y0 + 10.0;
                 let name_rect = [ix, name_y, iw, row_h];
                 self.shulkds_title.hits.push(HitItem {
-                    rect: [name_rect[0] - bx, name_rect[1] - by, name_rect[2], name_rect[3]],
+                    rect: [
+                        name_rect[0] - bx,
+                        name_rect[1] - by,
+                        name_rect[2],
+                        name_rect[3],
+                    ],
                     act: HitAct::CreateFocusField(0),
                     enabled: true,
                     focusable: true,
                 });
                 self.draw_text_field_box(batch, name_rect, focus == 0);
-                let caret = if focus == 0 && (self.started.elapsed().as_millis() / 450) % 2 == 0 { "|" } else { "" };
+                let caret = if focus == 0
+                    && self.shulkds_text_caret_shown()
+                    && (self.started.elapsed().as_millis() / 450) % 2 == 0
+                {
+                    "|"
+                } else {
+                    ""
+                };
                 let disp = format!("{name}{caret}");
                 let (d_fit, ds) = self.fit_text_width(&disp, iw - 12.0, 0.95);
-                batch.text_scaled(&self.gui.atlas, &d_fit, ix + 6.0, name_y + (row_h - 8.0 * ds) * 0.5, ds, TEXT_WHITE, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &d_fit,
+                    ix + 6.0,
+                    name_y + (row_h - 8.0 * ds) * 0.5,
+                    ds,
+                    TEXT_WHITE,
+                    true,
+                );
 
                 // Game Mode 3-way selector
                 let mode_y = name_y + row_h + 6.0;
                 let mw = ((iw - 6.0) / 3.0).floor();
                 let mw2 = iw - (mw + 3.0) * 2.0;
-                self.draw_title_pill_btn(batch, bx, by, [ix, mode_y, mw, row_h], "Survival", Some(ACCENT_GREEN), true, !creative && !options.hardcore, HitAct::CreateMode(false, false));
-                self.draw_title_pill_btn(batch, bx, by, [ix + mw + 3.0, mode_y, mw, row_h], "Hardcore", Some(ACCENT_RED), true, options.hardcore, HitAct::CreateMode(false, true));
-                self.draw_title_pill_btn(batch, bx, by, [ix + (mw + 3.0) * 2.0, mode_y, mw2, row_h], "Creative", Some(ACCENT_AMBER), true, creative && !options.hardcore, HitAct::CreateMode(true, false));
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, mode_y, mw, row_h],
+                    "Survival",
+                    Some(ACCENT_GREEN),
+                    true,
+                    !creative && !options.hardcore,
+                    HitAct::CreateMode(false, false),
+                );
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix + mw + 3.0, mode_y, mw, row_h],
+                    "Hardcore",
+                    Some(ACCENT_RED),
+                    true,
+                    options.hardcore,
+                    HitAct::CreateMode(false, true),
+                );
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix + (mw + 3.0) * 2.0, mode_y, mw2, row_h],
+                    "Creative",
+                    Some(ACCENT_AMBER),
+                    true,
+                    creative && !options.hardcore,
+                    HitAct::CreateMode(true, false),
+                );
 
                 // Difficulty 4-way selector
                 let diff_y = mode_y + row_h + 5.0;
@@ -1311,81 +2042,283 @@ impl Game<'_> {
                 // Allow Commands toggle
                 let cmd_y = diff_y + row_h + 5.0;
                 let cmd_on = options.commands(creative);
-                let cmd_lbl = if cmd_on { "Allow Commands: ON" } else { "Allow Commands: OFF" };
-                self.draw_title_pill_btn(batch, bx, by, [ix, cmd_y, iw, row_h.min(dock_y - 4.0 - cmd_y)], cmd_lbl, Some(ACCENT_BLUE), !options.hardcore, cmd_on, HitAct::CreateButton(24));
+                let cmd_lbl = if cmd_on {
+                    "Allow Commands: ON"
+                } else {
+                    "Allow Commands: OFF"
+                };
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, cmd_y, iw, row_h.min(dock_y - 4.0 - cmd_y)],
+                    cmd_lbl,
+                    Some(ACCENT_BLUE),
+                    !options.hardcore,
+                    cmd_on,
+                    HitAct::CreateButton(24),
+                );
             }
             1 => {
                 // World Type + Customize
                 let content_h = 3.0 * row_h + 24.0;
                 let wt_y = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
-                let preset_lbl = format!("World Type: {}", Self::world_preset_label(options.world_type));
-                let has_cust = matches!(options.world_type, WorldPreset::Flat | WorldPreset::SingleBiomeSurface);
+                let preset_lbl = format!(
+                    "World Type: {}",
+                    Self::world_preset_label(options.world_type)
+                );
+                let has_cust = matches!(
+                    options.world_type,
+                    WorldPreset::Flat | WorldPreset::SingleBiomeSurface
+                );
                 if has_cust {
                     let cust_w = 72.0;
-                    self.draw_title_pill_btn(batch, bx, by, [ix, wt_y, iw - cust_w - 4.0, row_h], &preset_lbl, Some(ACCENT_BLUE), true, false, HitAct::CreateButton(25));
-                    self.draw_title_pill_btn(batch, bx, by, [ix + iw - cust_w, wt_y, cust_w, row_h], "Customize", Some(ACCENT_AMBER), true, false, HitAct::CreateButton(26));
+                    self.draw_title_pill_btn(
+                        batch,
+                        bx,
+                        by,
+                        [ix, wt_y, iw - cust_w - 4.0, row_h],
+                        &preset_lbl,
+                        Some(ACCENT_BLUE),
+                        true,
+                        false,
+                        HitAct::CreateButton(25),
+                    );
+                    self.draw_title_pill_btn(
+                        batch,
+                        bx,
+                        by,
+                        [ix + iw - cust_w, wt_y, cust_w, row_h],
+                        "Customize",
+                        Some(ACCENT_AMBER),
+                        true,
+                        false,
+                        HitAct::CreateButton(26),
+                    );
                 } else {
-                    self.draw_title_pill_btn(batch, bx, by, [ix, wt_y, iw, row_h], &preset_lbl, Some(ACCENT_BLUE), true, false, HitAct::CreateButton(25));
+                    self.draw_title_pill_btn(
+                        batch,
+                        bx,
+                        by,
+                        [ix, wt_y, iw, row_h],
+                        &preset_lbl,
+                        Some(ACCENT_BLUE),
+                        true,
+                        false,
+                        HitAct::CreateButton(25),
+                    );
                 }
 
                 // Seed input
                 let slbl_y = wt_y + row_h + 7.0;
-                batch.text_scaled(&self.gui.atlas, "Seed for the World Generator", ix, slbl_y, 0.80, TEXT_MUTED, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    "Seed for the World Generator",
+                    ix,
+                    slbl_y,
+                    0.80,
+                    TEXT_MUTED,
+                    true,
+                );
                 let seed_y = slbl_y + 10.0;
                 let seed_rect = [ix, seed_y, iw, row_h];
                 self.shulkds_title.hits.push(HitItem {
-                    rect: [seed_rect[0] - bx, seed_rect[1] - by, seed_rect[2], seed_rect[3]],
+                    rect: [
+                        seed_rect[0] - bx,
+                        seed_rect[1] - by,
+                        seed_rect[2],
+                        seed_rect[3],
+                    ],
                     act: HitAct::CreateFocusField(1),
                     enabled: true,
                     focusable: true,
                 });
                 self.draw_text_field_box(batch, seed_rect, focus == 1);
-                let caret = if focus == 1 && (self.started.elapsed().as_millis() / 450) % 2 == 0 { "|" } else { "" };
-                let s_disp = if seed.is_empty() && focus != 1 {
+                let caret_active = focus == 1 && self.shulkds_text_caret_shown();
+                let caret = if caret_active && (self.started.elapsed().as_millis() / 450) % 2 == 0 {
+                    "|"
+                } else {
+                    ""
+                };
+                let s_disp = if seed.is_empty() && !caret_active {
                     "Leave blank for random seed".to_owned()
                 } else {
                     format!("{seed}{caret}")
                 };
-                let s_col = if seed.is_empty() && focus != 1 { TEXT_MUTED } else { TEXT_WHITE };
+                let s_col = if seed.is_empty() && !caret_active {
+                    TEXT_MUTED
+                } else {
+                    TEXT_WHITE
+                };
                 let (s_fit, ss) = self.fit_text_width(&s_disp, iw - 12.0, 0.90);
-                batch.text_scaled(&self.gui.atlas, &s_fit, ix + 6.0, seed_y + (row_h - 8.0 * ss) * 0.5, ss, s_col, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &s_fit,
+                    ix + 6.0,
+                    seed_y + (row_h - 8.0 * ss) * 0.5,
+                    ss,
+                    s_col,
+                    true,
+                );
 
                 // Structures & Bonus Chest
                 let sw_y = seed_y + row_h + 7.0;
                 let sw_w = ((iw - 4.0) * 0.5).floor();
-                self.draw_title_pill_btn(batch, bx, by, [ix, sw_y, sw_w, row_h], if options.structures { "Structures: ON" } else { "Structures: OFF" }, Some(ACCENT_GREEN), true, options.structures, HitAct::CreateButton(27));
-                self.draw_title_pill_btn(batch, bx, by, [ix + sw_w + 4.0, sw_y, iw - sw_w - 4.0, row_h], if options.bonus_chest() { "Bonus Chest: ON" } else { "Bonus Chest: OFF" }, Some(ACCENT_AMBER), !options.hardcore, options.bonus_chest(), HitAct::CreateButton(28));
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, sw_y, sw_w, row_h],
+                    if options.structures {
+                        "Structures: ON"
+                    } else {
+                        "Structures: OFF"
+                    },
+                    Some(ACCENT_GREEN),
+                    true,
+                    options.structures,
+                    HitAct::CreateButton(27),
+                );
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix + sw_w + 4.0, sw_y, iw - sw_w - 4.0, row_h],
+                    if options.bonus_chest() {
+                        "Bonus Chest: ON"
+                    } else {
+                        "Bonus Chest: OFF"
+                    },
+                    Some(ACCENT_AMBER),
+                    !options.hardcore,
+                    options.bonus_chest(),
+                    HitAct::CreateButton(28),
+                );
             }
             _ => {
                 // More tab: Game Rules, Data Packs, Experiments
                 let btn_h = ((body_h - 12.0) / 3.0).floor().clamp(18.0, 26.0);
                 let content_h = btn_h * 3.0 + 8.0;
                 let y0 = body_y + ((body_h - content_h) * 0.5).floor().max(0.0);
-                self.draw_title_pill_btn(batch, bx, by, [ix, y0, iw, btn_h], "Game Rules...", Some(ACCENT_BLUE), true, false, HitAct::CreateButton(29));
-                self.draw_title_pill_btn(batch, bx, by, [ix, y0 + 4.0 + btn_h, iw, btn_h], "Data Packs...", Some(ACCENT_GREEN), true, false, HitAct::CreateButton(31));
-                self.draw_title_pill_btn(batch, bx, by, [ix, y0 + 8.0 + btn_h * 2.0, iw, btn_h], "Experiments...", Some(ACCENT_AMBER), true, false, HitAct::CreateButton(30));
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, y0, iw, btn_h],
+                    "Game Rules...",
+                    Some(ACCENT_BLUE),
+                    true,
+                    false,
+                    HitAct::CreateButton(29),
+                );
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, y0 + 4.0 + btn_h, iw, btn_h],
+                    "Data Packs...",
+                    Some(ACCENT_GREEN),
+                    true,
+                    false,
+                    HitAct::CreateButton(31),
+                );
+                self.draw_title_pill_btn(
+                    batch,
+                    bx,
+                    by,
+                    [ix, y0 + 8.0 + btn_h * 2.0, iw, btn_h],
+                    "Experiments...",
+                    Some(ACCENT_AMBER),
+                    true,
+                    false,
+                    HitAct::CreateButton(30),
+                );
             }
         }
 
         // Bottom Create / Cancel dock
         let cw = ((iw - 6.0) * 0.68).floor();
-        self.draw_title_pill_btn(batch, bx, by, [ix, dock_y, cw, dock_h], "Create New World", Some(ACCENT_GREEN), true, false, HitAct::CreateButton(21));
-        self.draw_title_pill_btn(batch, bx, by, [ix + cw + 6.0, dock_y, iw - cw - 6.0, dock_h], "Cancel", Some(ACCENT_RED), true, false, HitAct::CreateButton(22));
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, dock_y, cw, dock_h],
+            "Create New World",
+            Some(ACCENT_GREEN),
+            true,
+            false,
+            HitAct::CreateButton(21),
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + cw + 6.0, dock_y, iw - cw - 6.0, dock_h],
+            "Cancel",
+            Some(ACCENT_RED),
+            true,
+            false,
+            HitAct::CreateButton(22),
+        );
     }
 
-    fn draw_bottom_title_multiplayer(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_multiplayer(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let pad = 8.0;
         let ix = bx + pad;
         let iw = (bw - pad * 2.0).max(80.0);
 
         let hdr_y = by + 6.0;
         let hdr_h = 16.0;
-        self.draw_title_pill_btn(batch, bx, by, [ix, hdr_y, 54.0, hdr_h], "< Back", None, true, false, HitAct::BackToMain);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, hdr_y, 54.0, hdr_h],
+            "< Back",
+            None,
+            true,
+            false,
+            HitAct::BackToMain,
+        );
         let hdr = lang::get_or("menu.multiplayer", "Multiplayer");
         let hw = HudBatch::text_width(&self.gui.atlas, &hdr);
-        batch.text(&self.gui.atlas, &hdr, ix + (iw - hw) * 0.5, hdr_y + 4.0, TEXT_WHITE, true);
-        self.draw_title_pill_btn(batch, bx, by, [ix + iw - 96.0, hdr_y, 44.0, hdr_h], "Refresh", None, true, false, HitAct::MpButton(45));
-        self.draw_title_pill_btn(batch, bx, by, [ix + iw - 48.0, hdr_y, 48.0, hdr_h], "+ Add", Some(ACCENT_GREEN), true, false, HitAct::MpButton(42));
+        batch.text(
+            &self.gui.atlas,
+            &hdr,
+            ix + (iw - hw) * 0.5,
+            hdr_y + 4.0,
+            TEXT_WHITE,
+            true,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + iw - 96.0, hdr_y, 44.0, hdr_h],
+            "Refresh",
+            None,
+            true,
+            false,
+            HitAct::MpButton(45),
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + iw - 48.0, hdr_y, 48.0, hdr_h],
+            "+ Add",
+            Some(ACCENT_GREEN),
+            true,
+            false,
+            HitAct::MpButton(42),
+        );
 
         let dock_h = 18.0;
         let dock_y = by + bh - dock_h - 8.0;
@@ -1395,7 +2328,11 @@ impl Game<'_> {
         let (summaries, sel, saved_count) = if let Some(title) = self.title.as_ref()
             && let Mode::Multiplayer(screen) = &title.mode
         {
-            (screen.list_summaries(), screen.selected_row(), screen.saved_server_count())
+            (
+                screen.list_summaries(),
+                screen.selected_row(),
+                screen.saved_server_count(),
+            )
         } else {
             (Vec::new(), None, 0)
         };
@@ -1415,7 +2352,15 @@ impl Game<'_> {
             self.draw_stone_panel(batch, [ix, list_y, list_w, 40.0]);
             let msg = "No servers — tap + Add or Direct Connect";
             let mw = HudBatch::text_width(&self.gui.atlas, msg) * 0.85;
-            batch.text_scaled(&self.gui.atlas, msg, ix + (list_w - mw) * 0.5, list_y + 16.0, 0.85, TEXT_MUTED, true);
+            batch.text_scaled(
+                &self.gui.atlas,
+                msg,
+                ix + (list_w - mw) * 0.5,
+                list_y + 16.0,
+                0.85,
+                TEXT_MUTED,
+                true,
+            );
         } else {
             for (i, srv) in summaries.iter().enumerate() {
                 let ry = list_y + i as f32 * row_step - self.shulkds_title.server_scroll;
@@ -1423,7 +2368,12 @@ impl Game<'_> {
                     continue;
                 }
                 let is_sel = sel == Some(i);
-                let focus_ord = self.shulkds_title.hits.iter().filter(|h| h.focusable).count();
+                let focus_ord = self
+                    .shulkds_title
+                    .hits
+                    .iter()
+                    .filter(|h| h.focusable)
+                    .count();
                 if self.shulkds_title.pending_row_focus == Some(i) {
                     self.shulkds_title.focus_idx = focus_ord;
                     self.shulkds_title.pending_row_focus = None;
@@ -1436,10 +2386,25 @@ impl Game<'_> {
                     enabled: true,
                     focusable: true,
                 });
-                let accent = if srv.is_lan { ACCENT_GREEN } else if srv.online { ACCENT_BLUE } else if srv.pinging { ACCENT_AMBER } else { ACCENT_RED };
+                let accent = if srv.is_lan {
+                    ACCENT_GREEN
+                } else if srv.online {
+                    ACCENT_BLUE
+                } else if srv.pinging {
+                    ACCENT_AMBER
+                } else {
+                    ACCENT_RED
+                };
                 let hovered = self.hit_under_pointer([r[0] - bx, r[1] - by, r[2], r[3]]);
                 self.draw_official_button(batch, r, true, focused, hovered, is_sel, false);
-                batch.fill(&self.gui.atlas, ix + 1.0, ry + 1.0, 3.0, row_h - 2.0, accent);
+                batch.fill(
+                    &self.gui.atlas,
+                    ix + 1.0,
+                    ry + 1.0,
+                    3.0,
+                    row_h - 2.0,
+                    accent,
+                );
 
                 if let Some(title) = self.title.as_ref()
                     && let Mode::Multiplayer(screen) = &title.mode
@@ -1457,13 +2422,22 @@ impl Game<'_> {
                     "Off".to_owned()
                 };
                 let rtw = HudBatch::text_width(&self.gui.atlas, &right_txt) * 0.80;
-                batch.text_scaled(&self.gui.atlas, &right_txt, ix + list_w - rtw - 6.0, ry + 5.0, 0.80, accent, true);
+                batch.text_scaled(
+                    &self.gui.atlas,
+                    &right_txt,
+                    ix + list_w - rtw - 6.0,
+                    ry + 5.0,
+                    0.80,
+                    accent,
+                    true,
+                );
 
                 let tx = ix + 34.0;
                 let avail = (ix + list_w - rtw - 12.0 - tx).max(30.0);
                 let (sn_fit, ss) = self.fit_text_width(&srv.name, avail, 0.94);
                 batch.text_scaled(&self.gui.atlas, &sn_fit, tx, ry + 5.0, ss, TEXT_WHITE, true);
-                let (m_fit, ms) = self.fit_text_width(&srv.motd.replace('\n', " "), iw - 42.0, 0.76);
+                let (m_fit, ms) =
+                    self.fit_text_width(&srv.motd.replace('\n', " "), iw - 42.0, 0.76);
                 batch.text_scaled(&self.gui.atlas, &m_fit, tx, ry + 16.0, ms, TEXT_MUTED, true);
             }
         }
@@ -1471,10 +2445,25 @@ impl Game<'_> {
 
         if max_scroll > 0.0 {
             let sb_x = ix + iw - 4.0;
-            batch.fill(&self.gui.atlas, sb_x, list_y, 3.0, list_h, rgba(18, 18, 20, 220));
+            batch.fill(
+                &self.gui.atlas,
+                sb_x,
+                list_y,
+                3.0,
+                list_h,
+                rgba(18, 18, 20, 220),
+            );
             let thumb_h = ((list_h / content_h) * list_h).clamp(16.0, list_h);
-            let thumb_y = list_y + (self.shulkds_title.server_scroll / max_scroll) * (list_h - thumb_h);
-            batch.fill(&self.gui.atlas, sb_x, thumb_y, 3.0, thumb_h, rgba(164, 164, 170, 255));
+            let thumb_y =
+                list_y + (self.shulkds_title.server_scroll / max_scroll) * (list_h - thumb_h);
+            batch.fill(
+                &self.gui.atlas,
+                sb_x,
+                thumb_y,
+                3.0,
+                thumb_h,
+                rgba(164, 164, 170, 255),
+            );
         }
 
         // Dock: [Join] [Direct] [Edit] [Del]
@@ -1483,13 +2472,70 @@ impl Game<'_> {
         let d_gap = 4.0;
         let small_w = ((iw - d_gap * 3.0) * 0.19).floor().clamp(38.0, 56.0);
         let join_w = (iw - small_w * 3.0 - d_gap * 3.0).max(56.0);
-        self.draw_title_pill_btn(batch, bx, by, [ix, dock_y, join_w, dock_h], "Join Server", Some(ACCENT_GREEN), has_sel, false, HitAct::MpButton(40));
-        self.draw_title_pill_btn(batch, bx, by, [ix + join_w + d_gap, dock_y, small_w, dock_h], "Direct", Some(ACCENT_BLUE), true, false, HitAct::MpButton(41));
-        self.draw_title_pill_btn(batch, bx, by, [ix + join_w + d_gap + small_w + d_gap, dock_y, small_w, dock_h], "Edit", None, saved_sel, false, HitAct::MpButton(43));
-        self.draw_title_pill_btn(batch, bx, by, [ix + join_w + d_gap + (small_w + d_gap) * 2.0, dock_y, small_w, dock_h], "Del", Some(ACCENT_RED), saved_sel, false, HitAct::MpButton(44));
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, dock_y, join_w, dock_h],
+            "Join Server",
+            Some(ACCENT_GREEN),
+            has_sel,
+            false,
+            HitAct::MpButton(40),
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + join_w + d_gap, dock_y, small_w, dock_h],
+            "Direct",
+            Some(ACCENT_BLUE),
+            true,
+            false,
+            HitAct::MpButton(41),
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [
+                ix + join_w + d_gap + small_w + d_gap,
+                dock_y,
+                small_w,
+                dock_h,
+            ],
+            "Edit",
+            None,
+            saved_sel,
+            false,
+            HitAct::MpButton(43),
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [
+                ix + join_w + d_gap + (small_w + d_gap) * 2.0,
+                dock_y,
+                small_w,
+                dock_h,
+            ],
+            "Del",
+            Some(ACCENT_RED),
+            saved_sel,
+            false,
+            HitAct::MpButton(44),
+        );
     }
 
-    fn draw_bottom_title_warning(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_warning(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let checked = self
             .title
             .as_ref()
@@ -1498,18 +2544,67 @@ impl Game<'_> {
         let ix = bx + pad;
         let iw = (bw - pad * 2.0).max(80.0);
         let mid_y = by + bh * 0.5 - 26.0;
-        let chk_lbl = if checked { "[x] Do not show this screen again" } else { "[ ] Do not show this screen again" };
-        self.draw_title_pill_btn(batch, bx, by, [ix, mid_y, iw, 20.0], chk_lbl, Some(ACCENT_AMBER), true, checked, HitAct::WarningCheck);
+        let chk_lbl = if checked {
+            "[x] Do not show this screen again"
+        } else {
+            "[ ] Do not show this screen again"
+        };
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, mid_y, iw, 20.0],
+            chk_lbl,
+            Some(ACCENT_AMBER),
+            true,
+            checked,
+            HitAct::WarningCheck,
+        );
         let btn_w = ((iw - 6.0) * 0.5).floor();
-        self.draw_title_pill_btn(batch, bx, by, [ix, mid_y + 28.0, btn_w, 20.0], "Proceed", Some(ACCENT_GREEN), true, false, HitAct::WarningProceed);
-        self.draw_title_pill_btn(batch, bx, by, [ix + btn_w + 6.0, mid_y + 28.0, iw - btn_w - 6.0, 20.0], "Back", Some(ACCENT_RED), true, false, HitAct::WarningBack);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, mid_y + 28.0, btn_w, 20.0],
+            "Proceed",
+            Some(ACCENT_GREEN),
+            true,
+            false,
+            HitAct::WarningProceed,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix + btn_w + 6.0, mid_y + 28.0, iw - btn_w - 6.0, 20.0],
+            "Back",
+            Some(ACCENT_RED),
+            true,
+            false,
+            HitAct::WarningBack,
+        );
     }
 
-    fn draw_bottom_title_options(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_options(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let pad = 8.0;
         let ix = bx + pad;
         let iw = (bw - pad * 2.0).max(80.0);
-        batch.text_scaled(&self.gui.atlas, "OPTIONS QUICK-JUMP", ix + 2.0, by + 10.0, 1.0, ACCENT_SILVER, true);
+        batch.text_scaled(
+            &self.gui.atlas,
+            "OPTIONS QUICK-JUMP",
+            ix + 2.0,
+            by + 10.0,
+            1.0,
+            ACCENT_SILVER,
+            true,
+        );
 
         let cur = self.ui.options.page();
         let dock_h = 18.0;
@@ -1539,12 +2634,39 @@ impl Game<'_> {
             let px = ix + if c == 0 { 0.0 } else { col_w + gap };
             let pw = if c == 0 { col_w } else { col2_w };
             let py = grid_y + r as f32 * (row_h + gap);
-            self.draw_title_pill_btn(batch, bx, by, [px, py, pw, row_h], lbl, Some(accent), true, cur == page, HitAct::OptionsPage(page));
+            self.draw_title_pill_btn(
+                batch,
+                bx,
+                by,
+                [px, py, pw, row_h],
+                lbl,
+                Some(accent),
+                true,
+                cur == page,
+                HitAct::OptionsPage(page),
+            );
         }
-        self.draw_title_pill_btn(batch, bx, by, [ix, dock_y, iw, dock_h], "Done / Back", Some(ACCENT_GREEN), true, false, HitAct::OptionsDone);
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, dock_y, iw, dock_h],
+            "Done / Back",
+            Some(ACCENT_GREEN),
+            true,
+            false,
+            HitAct::OptionsDone,
+        );
     }
 
-    fn draw_bottom_title_modal(&mut self, batch: &mut HudBatch, bx: f32, by: f32, bw: f32, bh: f32) {
+    fn draw_bottom_title_modal(
+        &mut self,
+        batch: &mut HudBatch,
+        bx: f32,
+        by: f32,
+        bw: f32,
+        bh: f32,
+    ) {
         let name = match self.title.as_ref().map(|t| &t.mode) {
             Some(Mode::Edit { .. }) => "Edit World",
             Some(Mode::Delete { .. }) => "Delete World",
@@ -1565,11 +2687,36 @@ impl Game<'_> {
         let cy = by + (bh - ch - 34.0) * 0.5;
         self.draw_stone_panel(batch, [ix, cy, iw, ch]);
         let nw = HudBatch::text_width(&self.gui.atlas, name);
-        batch.text(&self.gui.atlas, name, ix + (iw - nw) * 0.5, cy + 18.0, TEXT_WHITE, true);
+        batch.text(
+            &self.gui.atlas,
+            name,
+            ix + (iw - nw) * 0.5,
+            cy + 18.0,
+            TEXT_WHITE,
+            true,
+        );
         let sub = "Complete edits on the top screen";
         let sw = HudBatch::text_width(&self.gui.atlas, sub) * 0.85;
-        batch.text_scaled(&self.gui.atlas, sub, ix + (iw - sw) * 0.5, cy + 36.0, 0.85, TEXT_MUTED, true);
-        self.draw_title_pill_btn(batch, bx, by, [ix, by + bh - 28.0, iw, 18.0], "< Back", Some(ACCENT_SILVER), true, false, HitAct::ModalBack);
+        batch.text_scaled(
+            &self.gui.atlas,
+            sub,
+            ix + (iw - sw) * 0.5,
+            cy + 36.0,
+            0.85,
+            TEXT_MUTED,
+            true,
+        );
+        self.draw_title_pill_btn(
+            batch,
+            bx,
+            by,
+            [ix, by + bh - 28.0, iw, 18.0],
+            "< Back",
+            Some(ACCENT_SILVER),
+            true,
+            false,
+            HitAct::ModalBack,
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1588,7 +2735,9 @@ impl Game<'_> {
         self.shulkds_title.pointer_pos = Some((lx, ly));
 
         match action {
-            BottomPointerAction::Down { button: PointerButton::Primary } => {
+            BottomPointerAction::Down {
+                button: PointerButton::Primary,
+            } => {
                 self.shulkds_title.pointer_down = true;
                 self.shulkds.dashboard.pointer_down = true;
                 self.shulkds_title.drag_moved = false;
@@ -1624,7 +2773,9 @@ impl Game<'_> {
                     }
                 }
             }
-            BottomPointerAction::Up { button: PointerButton::Primary } => {
+            BottomPointerAction::Up {
+                button: PointerButton::Primary,
+            } => {
                 let was_down = self.shulkds_title.pointer_down;
                 let was_drag = self.shulkds_title.drag_moved;
                 self.shulkds_title.pointer_down = false;
@@ -1632,24 +2783,25 @@ impl Game<'_> {
                 self.shulkds_title.drag_start_y = None;
                 self.shulkds_title.drag_moved = false;
                 if was_down && !was_drag {
-                    let hit = self
-                        .shulkds_title
-                        .hits
-                        .iter()
-                        .position(|h| {
-                            h.enabled
-                                && lx >= h.rect[0]
-                                && lx <= h.rect[0] + h.rect[2]
-                                && ly >= h.rect[1]
-                                && ly <= h.rect[1] + h.rect[3]
-                        });
+                    let hit = self.shulkds_title.hits.iter().position(|h| {
+                        h.enabled
+                            && lx >= h.rect[0]
+                            && lx <= h.rect[0] + h.rect[2]
+                            && ly >= h.rect[1]
+                            && ly <= h.rect[1] + h.rect[3]
+                    });
                     if let Some(idx) = hit {
                         let act = self.shulkds_title.hits[idx].act;
+                        if !matches!(act, HitAct::CreateFocusField(_)) {
+                            self.dismiss_soft_keyboard();
+                        }
                         self.shulkds_title.focus_idx = self.shulkds_title.hits[..idx]
                             .iter()
                             .filter(|h| h.focusable)
                             .count();
                         self.execute_shulkds_title_hit(act);
+                    } else {
+                        self.dismiss_soft_keyboard();
                     }
                 }
             }
@@ -1718,9 +2870,7 @@ impl Game<'_> {
                 if let Some(title) = self.title.as_mut()
                     && let Mode::Select { worlds, selected } = &mut title.mode
                 {
-                    if *selected == Some(idx)
-                        && worlds.get(idx).is_some_and(WorldEntry::can_play)
-                    {
+                    if *selected == Some(idx) && worlds.get(idx).is_some_and(WorldEntry::can_play) {
                         should_play = true;
                     } else if idx < worlds.len() {
                         *selected = Some(idx);
@@ -1770,8 +2920,7 @@ impl Game<'_> {
                 if let Some(title) = self.title.as_mut() {
                     title.set_create_focus(f);
                 }
-                #[cfg(target_os = "android")]
-                self.touch_request_keyboard();
+                self.request_field_soft_keyboard();
             }
             HitAct::CreateMode(cre, hc) => {
                 if let Some(title) = self.title.as_mut() {
@@ -1890,7 +3039,14 @@ impl Game<'_> {
         let cx = bx + ((bw - card_w) * 0.5).floor();
         let cy = by + ((bh - card_h) * 0.5).floor();
         self.draw_stone_panel(batch, [cx, cy, card_w, card_h]);
-        batch.fill(&self.gui.atlas, cx + 2.0, cy + 2.0, card_w - 4.0, 2.0, ACCENT_GREEN);
+        batch.fill(
+            &self.gui.atlas,
+            cx + 2.0,
+            cy + 2.0,
+            card_w - 4.0,
+            2.0,
+            ACCENT_GREEN,
+        );
 
         let (t_fit, ts) = self.fit_text_width(&upd.stage_title, inner_w, 1.0);
         let tw = HudBatch::text_width(&self.gui.atlas, &t_fit) * ts;
@@ -1911,7 +3067,14 @@ impl Game<'_> {
         }
         if let Some(frac) = upd.progress {
             let py = ly + 4.0;
-            batch.fill(&self.gui.atlas, cx + pad, py, inner_w, 6.0, rgba(20, 22, 26, 255));
+            batch.fill(
+                &self.gui.atlas,
+                cx + pad,
+                py,
+                inner_w,
+                6.0,
+                rgba(20, 22, 26, 255),
+            );
             if frac > 0.0 {
                 batch.fill(
                     &self.gui.atlas,
@@ -2005,9 +3168,14 @@ impl Game<'_> {
                     self.shulkds_update_act(cancel_idx);
                     return Ok(true);
                 }
+                if self.dismiss_soft_keyboard() {
+                    return Ok(true);
+                }
                 match kind {
                     BottomTitleKind::Main => {}
-                    BottomTitleKind::Create => self.execute_shulkds_title_hit(HitAct::CreateButton(22)),
+                    BottomTitleKind::Create => {
+                        self.execute_shulkds_title_hit(HitAct::CreateButton(22))
+                    }
                     _ => self.execute_shulkds_title_hit(HitAct::ModalBack),
                 }
                 Ok(true)

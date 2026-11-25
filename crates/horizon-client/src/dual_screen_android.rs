@@ -49,6 +49,142 @@ pub fn take_secondary_ime_refocus() -> bool {
     SECONDARY_IME_REFOCUS.swap(false, Ordering::AcqRel)
 }
 
+pub const HINGE_CLOSE_DEG: f32 = 15.0;
+pub const HINGE_OPEN_DEG: f32 = 28.0;
+pub const HINGE_ARM_OPEN_DEG: f32 = 30.0;
+
+static CLAMSHELL_SLEEPING: AtomicBool = AtomicBool::new(false);
+static LID_CLOSED: AtomicBool = AtomicBool::new(false);
+static SLEEP_WAKE_NOTIFIER: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClamshellSleepTracker {
+    pub enabled: bool,
+    pub hinge_seen_open: bool,
+    pub hinge_closed: bool,
+    pub screen_off: bool,
+    pub app_suspended: bool,
+}
+
+impl Default for ClamshellSleepTracker {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            hinge_seen_open: false,
+            hinge_closed: false,
+            screen_off: false,
+            app_suspended: false,
+        }
+    }
+}
+
+impl ClamshellSleepTracker {
+    pub fn is_lid_closed(&self) -> bool {
+        self.enabled && (self.hinge_closed || self.screen_off)
+    }
+
+    pub fn is_sleeping(&self) -> bool {
+        self.app_suspended || self.is_lid_closed()
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) -> bool {
+        let prev = self.is_sleeping();
+        self.enabled = enabled;
+        self.is_sleeping() != prev
+    }
+
+    pub fn on_hinge_angle(&mut self, deg: f32) -> bool {
+        if !deg.is_finite() || deg < 0.0 {
+            return false;
+        }
+        let prev = self.is_sleeping();
+        if deg >= HINGE_ARM_OPEN_DEG {
+            self.hinge_seen_open = true;
+        }
+        if self.hinge_seen_open {
+            if deg <= HINGE_CLOSE_DEG {
+                self.hinge_closed = true;
+            } else if deg >= HINGE_OPEN_DEG {
+                self.hinge_closed = false;
+            }
+        }
+        self.is_sleeping() != prev
+    }
+
+    pub fn on_screen_power(&mut self, interactive: bool) -> bool {
+        let prev = self.is_sleeping();
+        self.screen_off = !interactive;
+        self.is_sleeping() != prev
+    }
+
+    pub fn on_app_suspended(&mut self, suspended: bool) -> bool {
+        let prev = self.is_sleeping();
+        self.app_suspended = suspended;
+        self.is_sleeping() != prev
+    }
+}
+
+fn sleep_singleton() -> &'static Mutex<ClamshellSleepTracker> {
+    static TRACKER: OnceLock<Mutex<ClamshellSleepTracker>> = OnceLock::new();
+    TRACKER.get_or_init(|| Mutex::new(ClamshellSleepTracker::default()))
+}
+
+pub fn register_sleep_wake_notifier(notify: impl Fn() + Send + Sync + 'static) {
+    let _ = SLEEP_WAKE_NOTIFIER.set(Box::new(notify));
+}
+
+fn notify_sleep_wake() {
+    if let Some(notify) = SLEEP_WAKE_NOTIFIER.get() {
+        notify();
+    }
+}
+
+fn apply_sleep_transition(f: impl FnOnce(&mut ClamshellSleepTracker) -> bool) -> bool {
+    let (changed, sleeping, lid_closed) = {
+        let mut guard = sleep_singleton()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let changed = f(&mut guard);
+        let sleeping = guard.is_sleeping();
+        let lid_closed = guard.is_lid_closed();
+        CLAMSHELL_SLEEPING.store(sleeping, Ordering::Release);
+        LID_CLOSED.store(lid_closed, Ordering::Release);
+        (changed, sleeping, lid_closed)
+    };
+    let _ = lid_closed;
+    if changed {
+        if sleeping {
+            reset_secondary_touches();
+        }
+        notify_sleep_wake();
+    }
+    changed
+}
+
+pub fn is_clamshell_sleeping() -> bool {
+    CLAMSHELL_SLEEPING.load(Ordering::Acquire)
+}
+
+pub fn is_lid_closed() -> bool {
+    LID_CLOSED.load(Ordering::Acquire)
+}
+
+pub fn set_lid_sleep_enabled(enabled: bool) -> bool {
+    apply_sleep_transition(|t| t.set_enabled(enabled))
+}
+
+pub fn update_hinge_angle(deg: f32) -> bool {
+    apply_sleep_transition(|t| t.on_hinge_angle(deg))
+}
+
+pub fn update_screen_power(interactive: bool) -> bool {
+    apply_sleep_transition(|t| t.on_screen_power(interactive))
+}
+
+pub fn update_app_suspended(suspended: bool) -> bool {
+    apply_sleep_transition(|t| t.on_app_suspended(suspended))
+}
+
 /// Android `MotionEvent` masked action constants (`MotionEvent.getActionMasked()`).
 pub const ACTION_DOWN: i32 = 0;
 pub const ACTION_UP: i32 = 1;
@@ -335,6 +471,9 @@ pub fn push_secondary_motion_event(
     width: f32,
     height: f32,
 ) {
+    if is_clamshell_sleeping() {
+        return;
+    }
     let mut q = touch_singleton()
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
@@ -724,5 +863,61 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn clamshell_sleep_tracker_ignores_initial_zero_and_uses_hysteresis() {
+        let mut t = ClamshellSleepTracker::default();
+        assert!(!t.is_sleeping());
+
+        // Hardware sensors that initially report 0 deg before being armed open do not lock sleep.
+        assert!(!t.on_hinge_angle(0.0));
+        assert!(!t.is_sleeping());
+        assert!(!t.on_hinge_angle(-5.0));
+        assert!(!t.on_hinge_angle(f32::NAN));
+
+        // Open past arm threshold (>= 30 deg), then test close/hysteresis/open cycle.
+        assert!(!t.on_hinge_angle(90.0));
+        assert!(t.hinge_seen_open);
+        assert!(!t.is_sleeping());
+
+        assert!(t.on_hinge_angle(14.0));
+        assert!(t.is_lid_closed());
+        assert!(t.is_sleeping());
+
+        // Inside deadband (15..28 deg): remains asleep.
+        assert!(!t.on_hinge_angle(20.0));
+        assert!(t.is_sleeping());
+
+        // Opens past 28 deg: wakes.
+        assert!(t.on_hinge_angle(30.0));
+        assert!(!t.is_lid_closed());
+        assert!(!t.is_sleeping());
+    }
+
+    #[test]
+    fn clamshell_sleep_tracker_screen_power_and_disable_behavior() {
+        let mut t = ClamshellSleepTracker::default();
+        assert!(t.on_screen_power(false));
+        assert!(t.is_lid_closed());
+        assert!(t.is_sleeping());
+
+        // Disabling lid sleep suppresses hinge/screen-off sleep.
+        assert!(t.set_enabled(false));
+        assert!(!t.is_lid_closed());
+        assert!(!t.is_sleeping());
+
+        // Background OS suspend still pauses regardless of lid sleep preference.
+        assert!(t.on_app_suspended(true));
+        assert!(t.is_sleeping());
+        assert!(!t.is_lid_closed());
+
+        assert!(t.on_app_suspended(false));
+        assert!(!t.is_sleeping());
+
+        assert!(t.set_enabled(true));
+        assert!(t.is_sleeping());
+        assert!(t.on_screen_power(true));
+        assert!(!t.is_sleeping());
     }
 }

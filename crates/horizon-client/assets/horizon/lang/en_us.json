@@ -636,8 +636,13 @@
   "horizon.extras.shulkds_classic_inventory.tooltip": "Open the classic Survival and Creative inventory menus on the top screen when pressing Y/E instead of the bottom-screen touch inventory and Console Creative catalog.",
   "horizon.extras.shulkds_auto_updates": "Auto Updates",
   "horizon.extras.shulkds_auto_updates.tooltip": "Check GitHub Releases when ShulkDS starts and prompt to download and install new updates.",
+  "horizon.extras.shulkds_lid_sleep": "Lid Sleep Mode",
+  "horizon.extras.shulkds_lid_sleep.tooltip": "Put ShulkDS into low-power sleep when closing your clamshell handheld: wake onto the Pause menu, resume straight into gameplay like a 3DS, or turn lid sleep off.",
   "horizon.shulkds.hotbar.bottom": "Bottom Screen (Bottom)",
   "horizon.shulkds.hotbar.top": "Bottom Screen (Top)",
   "horizon.shulkds.hotbar.classic": "Top Screen (Classic)",
+  "horizon.shulkds.lid_sleep.pause": "Pause Menu",
+  "horizon.shulkds.lid_sleep.resume": "Instant Resume",
+  "horizon.shulkds.lid_sleep.off": "Off",
   "horizon.shulkds.check_updates": "Check for Updates"
 }

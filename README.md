@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ShulkDS-v1.0.2-6B428A" alt="ShulkDS v1.0.2">
+  <img src="https://img.shields.io/badge/ShulkDS-v1.0.3-6B428A" alt="ShulkDS v1.0.3">
   <a href="https://github.com/NaiSenshin/ShulkDS/releases"><img src="https://img.shields.io/github/downloads/NaiSenshin/ShulkDS/total?color=4E357C&label=downloads" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
   <img src="https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white" alt="Rust">
@@ -20,7 +20,8 @@ ShulkDS is a dual-screen Android fork of [Horizon](https://github.com/horizon-ru
 ## Highlights
 
 - **Dual-screen gameplay:** Clean 3D view on the top screen while your map, inventory, and settings stay open on the bottom touchscreen.
-- **Bottom screen dashboard:** Tabs for a live minimap with coordinates and FPS, a touch inventory with quick-manage buttons, and quick option sliders.
+- **Bottom screen dashboard:** Tabs for a framed live minimap with clock, compass, coordinates, live biome detection, pixel-art dimension icons, and FPS, alongside a touch inventory and quick option sliders.
+- **Clamshell sleep mode:** Automatically pauses, saves, and drops to 0 Hz when closing the lid on dual-screen devices, with Pause, Instant Resume, and Off options.
 - **Console Edition & Classic menus:** Use controller-friendly Legacy4J Console Edition layouts or switch to Classic Crafting and Classic Inventory with a virtual mouse cursor.
 - **Fast crafting & smart sorting:** Hold to craft or trade rapidly, with craftable recipes and affordable villager trades sorted to the far left.
 - **Customizable hotbar & handheld scaling:** Place the hotbar at the bottom, top of the lower screen, or classic top screen, with clean bottom-screen scaling on Retroid Pocket Duo and AYN Thor.
@@ -54,8 +55,8 @@ ShulkDS is a dual-screen Android fork of [Horizon](https://github.com/horizon-ru
 
 ## Install
 
-1. Download **`shulkds-1.0.2-arm64-v8a.apk`** from [Releases](https://github.com/NaiSenshin/ShulkDS/releases/latest).
-   - Updating from `v1.0.0` or `v1.0.1`: install the new APK right over your current install.
+1. Download **`shulkds-1.0.3-arm64-v8a.apk`** from [Releases](https://github.com/NaiSenshin/ShulkDS/releases/latest).
+   - Updating from `v1.0.0`, `v1.0.1`, or `v1.0.2`: install the new APK right over your current install, or accept the in-game update prompt.
    - Updating from an older `0.8.0` test build: uninstall `0.8.0` first. Your worlds and settings in `/sdcard/ShulkDS` will stay intact.
 2. Open ShulkDS, allow storage access if prompted, and sign in with a Microsoft account that owns *Minecraft: Java Edition* so it can download your game files.
 
@@ -69,7 +70,7 @@ cd ShulkDS
 python3 packaging/android/build_apk.py --profile fast
 ```
 
-The built APK outputs to `target/android/shulkds-1.0.2-arm64-v8a.apk`. No Minecraft `.jar` files, assets, or prepared resources are committed or packaged.
+The built APK outputs to `target/android/shulkds-1.0.3-arm64-v8a.apk`. No Minecraft `.jar` files, assets, or prepared resources are committed or packaged.
 
 ## License & Attribution
 

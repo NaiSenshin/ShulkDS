@@ -1,23 +1,19 @@
-Feature and quality-of-life update for **ShulkDS** adding customizable hotbar placement, AYN Thor bottom-screen scaling fixes, automatic in-game updates, optional Classic menus with a virtual mouse cursor, fast crafting, and craftable-first recipe sorting.
+ShulkDS `v1.0.3` brings a redesigned bottom-screen Map telemetry panel, automatic sleep mode for clamshell devices, and dual-screen soft keyboard fixes.
 
-> **Disclaimer:** No Minecraft files are included. On first launch, sign in with a Microsoft account that owns *Minecraft: Java Edition* and ShulkDS will download and set up 26.3 on your device.
+> **Disclaimer:** Not an official Minecraft product, and not approved by or associated with Mojang or Microsoft. ShulkDS does not include any Minecraft `.jar` files, assets, or game data.
 
 ## Highlights
 
-- **Customizable hotbar position:** Switch the hotbar between the bottom edge, top of the bottom screen, or the classic top screen.
-- **AYN Thor bottom-screen scaling:** Fixes bottom-screen UI scaling and centers panels cleanly on taller handheld displays.
-- **Automatic in-game updates:** Checks official ShulkDS GitHub Releases and installs updates directly on your handheld.
-- **Optional Classic UIs & virtual cursor:** Toggle Classic Crafting and Classic Inventory independently, with Controlify virtual mouse navigation across slot menus.
-- **Fast crafting & craftable-first sorting:** Hold to craft or trade rapidly while craftable recipes, variants, and affordable villager trades sort to the far left.
+- **Bottom screen additions:** Redesigned the Map telemetry panel with a framed minimap, live biome detection, and pixel-art dimension icons.
+- **Clamshell sleep mode:** Added automatic sleep mode when closing the lid on dual-screen devices, with Pause, Instant Resume, and Off options.
+- **Keyboard fixes:** Improved opening and closing the on-screen keyboard across chat, world creation, and creative search.
 
 ## Install
 
-- Download **`shulkds-1.0.2-arm64-v8a.apk`** below and open it on your handheld.
-- **Updating from `v1.0.0` or `v1.0.1`:** Install the new APK right over your current install.
-- **Updating from an older `0.8.0` test build:** Uninstall `0.8.0` first. Your worlds and settings in `/sdcard/ShulkDS` will stay intact.
+- Download **`shulkds-1.0.3-arm64-v8a.apk`** below or accept the in-game update prompt to install directly over `v1.0.2` while keeping your worlds and settings.
 
 ## SHA-256
 
 ```text
-000d95d01c6e39e48f657bccbac42c20d24b33a0929a92913aa1686479bdf371  shulkds-1.0.2-arm64-v8a.apk
+f4afc968c26d0cd323608f902a70518d0e27bc73fda55c242b69c885667a5912  shulkds-1.0.3-arm64-v8a.apk
 ```

@@ -24,6 +24,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 
 /**
@@ -37,6 +38,7 @@ public final class SecondaryDisplay {
     static native void onSurfaceReady(Surface surface, int width, int height);
     static native void onSurfaceDestroyed();
     static native void onImeActive(boolean active);
+    static native void onSecondaryImeHeight(int pixels);
     static native void onTouch(
             int primaryPointerId,
             int actionMasked,
@@ -50,6 +52,7 @@ public final class SecondaryDisplay {
     private final DisplayManager displayManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean resumed;
+    private boolean sleeping;
     private BottomPresentation presentation;
     private int currentDisplayId = Display.INVALID_DISPLAY;
 
@@ -103,6 +106,18 @@ public final class SecondaryDisplay {
         pause();
     }
 
+    public void setSleeping(boolean sleeping) {
+        if (this.sleeping == sleeping) {
+            return;
+        }
+        this.sleeping = sleeping;
+        if (sleeping) {
+            dismissCurrent();
+        } else {
+            reconcile();
+        }
+    }
+
     public boolean showTextMirror(String text, int cursor, int anchor, int maxLength, int flags, int generation) {
         if (presentation == null || !presentation.isShowing()) {
             return false;
@@ -123,8 +138,14 @@ public final class SecondaryDisplay {
         if (presentation == null || !presentation.isShowing()) {
             return false;
         }
-        presentation.hideTextMirror();
+        presentation.hideTextMirror(false);
         return true;
+    }
+
+    public void hideKeyboard() {
+        if (presentation != null && presentation.isShowing()) {
+            presentation.hideTextMirror(false);
+        }
     }
 
     @SuppressWarnings("deprecation")
@@ -173,7 +194,7 @@ public final class SecondaryDisplay {
     }
 
     private void reconcile() {
-        if (!resumed || activity.isFinishing() || activity.isDestroyed()) {
+        if (!resumed || sleeping || activity.isFinishing() || activity.isDestroyed()) {
             dismissCurrent();
             return;
         }
@@ -209,11 +230,7 @@ public final class SecondaryDisplay {
         currentDisplayId = Display.INVALID_DISPLAY;
         if (old != null) {
             try {
-                if (old.imeActive) {
-                    old.imeActive = false;
-                    old.imeHadFocus = false;
-                    onImeActive(false);
-                }
+                old.hideTextMirror(true);
                 if (old.surfaceActive) {
                     old.surfaceActive = false;
                     onSurfaceDestroyed();
@@ -232,7 +249,7 @@ public final class SecondaryDisplay {
         private TextMirror mirror;
         boolean surfaceActive;
         boolean imeActive;
-        boolean imeHadFocus;
+        int imeSessionId;
         private int trackedPointerId = MotionEvent.INVALID_POINTER_ID;
         private float bestRefreshRate = 0f;
 
@@ -283,18 +300,44 @@ public final class SecondaryDisplay {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT));
             mirror = new TextMirror(getContext());
+            mirror.setDismissListener(new Runnable() {
+                @Override
+                public void run() {
+                    hideTextMirror(true);
+                }
+            });
             root.addView(mirror, new FrameLayout.LayoutParams(1, 1));
             setContentView(
                     root,
                     new ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT));
+            if (Build.VERSION.SDK_INT >= 30 && win != null) {
+                win.getDecorView().setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                    @Override
+                    public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
+                        int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+                        onSecondaryImeHeight(imeBottom);
+                        if (!imeActive
+                                && (insets.isVisible(WindowInsets.Type.navigationBars())
+                                        || insets.isVisible(WindowInsets.Type.statusBars()))) {
+                            view.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    hideSystemBars();
+                                }
+                            });
+                        }
+                        return view.onApplyWindowInsets(insets);
+                    }
+                });
+            }
             hideSystemBars();
         }
 
         void showTextMirror(String text, int cursor, int anchor, int maxLength, int flags, int generation) {
             imeActive = true;
-            imeHadFocus = false;
+            imeSessionId++;
             onImeActive(true);
             Window win = getWindow();
             if (win != null) {
@@ -314,23 +357,44 @@ public final class SecondaryDisplay {
             }
         }
 
-        void hideTextMirror() {
+        void hideTextMirror(boolean notifyRust) {
+            boolean wasActive = imeActive;
             imeActive = false;
-            imeHadFocus = false;
             if (mirror != null) {
                 mirror.hide();
             }
+            final InputMethodManager imm =
+                    (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
             Window win = getWindow();
             if (win != null) {
+                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+                        | WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
+                View decor = win.getDecorView();
+                if (imm != null && decor != null && decor.getWindowToken() != null) {
+                    imm.hideSoftInputFromWindow(decor.getWindowToken(), 0);
+                }
                 win.addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
             }
+            onSecondaryImeHeight(0);
             hideSystemBars();
-            onImeActive(false);
+            if (wasActive) {
+                onImeActive(false);
+            }
+            if (notifyRust && wasActive) {
+                TextMirror.onMirrorDismissed();
+            }
+            final int session = imeSessionId;
             if (ownerActivity != null && ownerActivity.getWindow() != null) {
                 final View decor = ownerActivity.getWindow().getDecorView();
                 decor.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (imeActive || imeSessionId != session) {
+                            return;
+                        }
+                        if (imm != null && decor.getWindowToken() != null) {
+                            imm.hideSoftInputFromWindow(decor.getWindowToken(), 0);
+                        }
                         decor.setFocusableInTouchMode(true);
                         decor.requestFocus();
                     }
@@ -339,20 +403,13 @@ public final class SecondaryDisplay {
         }
 
         @Override
-        public void onWindowFocusChanged(boolean hasFocus) {
-            super.onWindowFocusChanged(hasFocus);
-            if (!imeActive) {
-                return;
-            }
-            if (hasFocus) {
-                imeHadFocus = true;
-            } else if (imeHadFocus) {
-                hideTextMirror();
-            }
-        }
-
-        @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
+            if (imeActive && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                    hideTextMirror(true);
+                }
+                return true;
+            }
             if (super.dispatchKeyEvent(event)) {
                 return true;
             }
