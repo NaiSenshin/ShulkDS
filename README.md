@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ShulkDS-v1.0.3-6B428A" alt="ShulkDS v1.0.3">
+  <a href="https://github.com/NaiSenshin/ShulkDS/releases/latest"><img src="https://img.shields.io/github/v/release/NaiSenshin/ShulkDS?color=6B428A&label=ShulkDS" alt="ShulkDS latest release"></a>
   <a href="https://github.com/NaiSenshin/ShulkDS/releases"><img src="https://img.shields.io/github/downloads/NaiSenshin/ShulkDS/total?color=4E357C&label=downloads" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
   <img src="https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white" alt="Rust">
