@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "horizon-android"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "horizon-client",
  "jni 0.21.1",
@@ -1169,7 +1169,7 @@ dependencies = [
 
 [[package]]
 name = "horizon-client"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "horizon-client-lib"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "horizon-core"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "libm",
 ]

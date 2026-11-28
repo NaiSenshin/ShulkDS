@@ -492,7 +492,8 @@ pub(super) fn stage_pack(
             HudAtlas::build_over_with_image(&root, vanilla_root, mod_image)
                 .map_err(|e| e.to_string())
         });
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
+        let panorama =
+            s.spawn(|| horizon_client::gfx::panorama::Faces::load_shulkds(&root, vanilla_root));
         let small = s.spawn(|| {
             (
                 horizon_client::sound_events::SoundRegistry::load(&root),

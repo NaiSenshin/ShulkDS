@@ -245,6 +245,21 @@ fn android_utility_sprites(images: &[PackedImage]) -> Vec<PackedImage> {
 
 const SHULKDS_DIM_SPRITE_SIZE: usize = 14;
 
+/// Tints the default grey `widget/button` sprite into classic Minecraft's
+/// purplish-blue highlighted button while keeping its 1px black outline intact.
+fn shulkds_classic_button_highlighted(src: &[u8]) -> Vec<u8> {
+    let mut out = src.to_vec();
+    for px in out.chunks_exact_mut(4) {
+        if px[3] == 0 || (px[0] < 24 && px[1] < 24 && px[2] < 24) {
+            continue;
+        }
+        px[0] = ((f32::from(px[0]) * 1.06).round() as u16).min(255) as u8;
+        px[1] = ((f32::from(px[1]) * 1.18).round() as u16).min(255) as u8;
+        px[2] = ((f32::from(px[2]) * 1.75).round() as u16).min(255) as u8;
+    }
+    out
+}
+
 /// Unified 14x14 pixel-art dimension thumbnails baked at atlas load time from
 /// the active pack's textures so every element snaps to the same coarse grid.
 fn shulkds_dimension_sprites(images: &[PackedImage]) -> Vec<PackedImage> {
@@ -2492,6 +2507,28 @@ impl HudAtlas {
         images.extend(touch);
         images.extend(android_utility_sprites(&images));
         images.extend(shulkds_dimension_sprites(&images));
+        if let Some((_, bw, bh, bpixels)) = images
+            .iter()
+            .find(|i| i.0 == "gui/sprites/widget/button")
+            .cloned()
+        {
+            let tinted = shulkds_classic_button_highlighted(&bpixels);
+            if let Some(hl) = images
+                .iter_mut()
+                .find(|i| i.0 == "gui/sprites/widget/button_highlighted")
+            {
+                hl.1 = bw;
+                hl.2 = bh;
+                hl.3 = tinted;
+            } else {
+                images.push((
+                    "gui/sprites/widget/button_highlighted".into(),
+                    bw,
+                    bh,
+                    tinted,
+                ));
+            }
+        }
         // The title screen's "JAVA EDITION" banner reads "RUST EDITION".
         if let Some(edition) = images
             .iter_mut()
@@ -5694,5 +5731,20 @@ texture=wide",
             assert_eq!(pixels.len(), 14 * 14 * 4);
             assert!(pixels.chunks_exact(4).all(|px| px[3] == 255));
         }
+    }
+
+    #[test]
+    fn shulkds_classic_button_highlighted_tints_stone_and_preserves_black() {
+        let src = [
+            0, 0, 0, 255, // black border
+            111, 111, 111, 255, // grey stone body
+            170, 170, 170, 255, // light bevel
+            0, 0, 0, 0, // transparent
+        ];
+        let tinted = shulkds_classic_button_highlighted(&src);
+        assert_eq!(&tinted[0..4], &[0, 0, 0, 255]);
+        assert!(tinted[6] > tinted[5] && tinted[5] > tinted[4]);
+        assert!(tinted[10] > tinted[9] && tinted[9] > tinted[8]);
+        assert_eq!(&tinted[12..16], &[0, 0, 0, 0]);
     }
 }

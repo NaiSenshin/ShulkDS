@@ -408,7 +408,8 @@ impl Game<'_> {
                 }
             }
             return Ok(());
-        } else if button == Button::Select && self.screen == Screen::Playing && self.title.is_none() {
+        } else if button == Button::Select && self.screen == Screen::Playing && self.title.is_none()
+        {
             if down {
                 self.pad.radial.open = true;
                 self.pad.radial.selected = None;
@@ -451,7 +452,9 @@ impl Game<'_> {
                 Ok(())
             }
             "key.sneak"
-                if self.settings.controller.toggle_sneak && !self.settings.toggle_crouch =>
+                if self.settings.controller.toggle_sneak
+                    && !self.settings.toggle_crouch
+                    && !self.crouch_requires_hold() =>
             {
                 // A stick click flips sneaking instead of holding it, as
                 // vanilla's toggle crouch does: a screen opening releases it
@@ -538,7 +541,9 @@ impl Game<'_> {
             return;
         }
         if self.pad.radial.open {
-            self.pad.radial.update_stick(self.pad.state.right, settings.look_deadzone);
+            self.pad
+                .radial
+                .update_stick(self.pad.state.right, settings.look_deadzone);
             return;
         }
         // A long frame (a hitch) must not spin the view.

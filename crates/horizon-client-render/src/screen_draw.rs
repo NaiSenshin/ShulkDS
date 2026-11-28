@@ -562,6 +562,7 @@ pub fn button(
             shadow_color: Some(0),
             ..Style::color(rgb)
         }),
+        _ if active && highlighted => label.clone().with_style(&Style::color(0xFFFFA0)),
         _ => label.clone(),
     };
     scrolling_string_over_contents(out, m, &label, x, y, w, h, 2, now_ms);

@@ -785,7 +785,12 @@ impl Game<'_> {
             gamepad::focus_step_rect(focus.rect, button, &rects)
         };
         match step {
-            Some(i) => self.pad_focus_on(event_loop, targets[i]),
+            Some(i) => {
+                self.pad_focus_on(event_loop, targets[i]);
+                if !self.pad.menu.keyboard {
+                    self.audio.play_ui_focus();
+                }
+            }
             None if vertical => {
                 // Off the visible rows of a list: scroll it and try again on
                 // the next frame.
@@ -1084,7 +1089,12 @@ impl Game<'_> {
                 None => gamepad::focus_step_vague(p.from, p.button, &rects).map(|i| (i, None)),
             };
             match step {
-                Some((i, _)) => self.pad_focus_on(event_loop, targets[i]),
+                Some((i, _)) => {
+                    self.pad_focus_on(event_loop, targets[i]);
+                    if !self.pad.menu.keyboard {
+                        self.audio.play_ui_focus();
+                    }
+                }
                 None => {
                     if let Some(dy) = gamepad::scroll_shift(&p.before, &rects)
                         && p.tries < SCROLL_TRIES

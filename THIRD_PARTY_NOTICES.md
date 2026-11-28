@@ -308,7 +308,7 @@ ShulkDS builds on [Starling](https://github.com/starling-client/starling) (`star
 
 ## Legacy4J
 
-ShulkDS's Console Edition crafting, stonecutter, merchant, creative, container, and HUD layouts (`crates/horizon-client/src/game/legacy_gui.rs`, `legacy_crafting.rs`, `legacy_creative.rs`, `crates/horizon-client/assets/legacy/*.json`, and `crates/horizon-client-render/assets/legacy/*.png`) are ported from and bundle UI sprites/layout definitions from [Legacy4J](https://github.com/Wilyicaro/Legacy-Minecraft) (Copyright (C) 2026 Icaro K. Bomfim), licensed under the GNU Lesser General Public License version 3 ([licenses/LGPL-3.0.txt](licenses/LGPL-3.0.txt) and [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)).
+ShulkDS's Console Edition crafting, stonecutter, merchant, creative, container, and HUD layouts (`crates/horizon-client/src/game/legacy_gui.rs`, `legacy_crafting.rs`, `legacy_creative.rs`, `crates/horizon-client/assets/legacy/*.json`, `crates/horizon-client-render/assets/legacy/*.png`, and console UI sounds in `crates/horizon-client-render/assets/legacy/sounds/*.ogg`) are ported from and bundle UI sprites/layout definitions/audio from [Legacy4J](https://github.com/Wilyicaro/Legacy-Minecraft) (Copyright (C) 2026 Icaro K. Bomfim), licensed under the GNU Lesser General Public License version 3 ([licenses/LGPL-3.0.txt](licenses/LGPL-3.0.txt) and [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)).
 
 ## Controlify
 

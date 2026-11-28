@@ -2640,11 +2640,7 @@ impl Game<'_> {
             });
         let should_present = touch_active
             || h != self.shulkds.dashboard.last_bottom_sig
-            || (self.title.is_some() && elapsed >= std::time::Duration::from_millis(33))
-            || (self.shulkds.dashboard.active_tab == DashboardTab::Minimap
-                && telemetry_sig != self.shulkds.dashboard.last_bottom_telemetry_sig
-                && elapsed >= std::time::Duration::from_millis(66))
-            || elapsed >= std::time::Duration::from_millis(500);
+            || elapsed >= std::time::Duration::from_millis(33);
         if should_present {
             self.shulkds.dashboard.last_bottom_sig = h;
             self.shulkds.dashboard.last_bottom_telemetry_sig = telemetry_sig;

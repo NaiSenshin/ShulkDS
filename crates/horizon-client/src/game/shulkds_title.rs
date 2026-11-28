@@ -195,6 +195,7 @@ impl Game<'_> {
             self.shulkds_title.drag_start_y = None;
             self.shulkds_title.drag_moved = false;
             self.shulkds_title.pointer_down = false;
+            self.shulkds_title.pointer_pos = None;
             self.shulkds.dashboard.pointer_down = false;
             match tag {
                 0 => {
@@ -352,17 +353,6 @@ impl Game<'_> {
                 u32::MAX
             };
             ui::nine_slice(batch, a, sprite, rect[0], rect[1], rect[2], rect[3], tint);
-            if focused && !hovered {
-                batch.fill(a, rect[0], rect[1], rect[2], 1.0, BORDER_GLOW);
-                batch.fill(
-                    a,
-                    rect[0],
-                    rect[1] + rect[3] - 1.0,
-                    rect[2],
-                    1.0,
-                    BORDER_GLOW,
-                );
-            }
         } else {
             let bg = if !enabled {
                 rgba(22, 24, 30, 195)
@@ -2749,6 +2739,25 @@ impl Game<'_> {
             }
             BottomPointerAction::Down { .. } => {}
             BottomPointerAction::Move => {
+                if !self.shulkds_title.pointer_down
+                    && let Some(idx) = self.shulkds_title.hits.iter().position(|h| {
+                        h.enabled
+                            && h.focusable
+                            && lx >= h.rect[0]
+                            && lx <= h.rect[0] + h.rect[2]
+                            && ly >= h.rect[1]
+                            && ly <= h.rect[1] + h.rect[3]
+                    })
+                {
+                    let new_focus = self.shulkds_title.hits[..idx]
+                        .iter()
+                        .filter(|h| h.focusable)
+                        .count();
+                    if new_focus != self.shulkds_title.focus_idx {
+                        self.shulkds_title.focus_idx = new_focus;
+                        self.audio.play_ui_focus();
+                    }
+                }
                 if self.shulkds_title.pointer_down
                     && let Some(start_y) = self.shulkds_title.drag_start_y
                 {
@@ -2779,6 +2788,7 @@ impl Game<'_> {
                 let was_down = self.shulkds_title.pointer_down;
                 let was_drag = self.shulkds_title.drag_moved;
                 self.shulkds_title.pointer_down = false;
+                self.shulkds_title.pointer_pos = None;
                 self.shulkds.dashboard.pointer_down = false;
                 self.shulkds_title.drag_start_y = None;
                 self.shulkds_title.drag_moved = false;
@@ -2807,6 +2817,7 @@ impl Game<'_> {
             }
             BottomPointerAction::Up { .. } => {
                 self.shulkds_title.pointer_down = false;
+                self.shulkds_title.pointer_pos = None;
                 self.shulkds.dashboard.pointer_down = false;
                 self.shulkds_title.drag_start_y = None;
                 self.shulkds_title.drag_moved = false;
@@ -2829,7 +2840,14 @@ impl Game<'_> {
     }
 
     fn execute_shulkds_title_hit(&mut self, act: HitAct) {
-        self.audio.play_button_click();
+        if matches!(
+            act,
+            HitAct::BackToMain | HitAct::WarningBack | HitAct::OptionsDone | HitAct::ModalBack
+        ) {
+            self.audio.play_ui_back();
+        } else {
+            self.audio.play_button_click();
+        }
         match act {
             HitAct::MainSingleplayer => {
                 if let Some(title) = self.title.as_mut() {
@@ -3186,7 +3204,7 @@ impl Game<'_> {
                 {
                     let prev = (options.tab + 2) % 3;
                     title.select_create_tab_index(prev);
-                    self.audio.play_button_click();
+                    self.audio.play_ui_scroll();
                 }
                 Ok(true)
             }
@@ -3196,7 +3214,7 @@ impl Game<'_> {
                 {
                     let next = (options.tab + 1) % 3;
                     title.select_create_tab_index(next);
-                    self.audio.play_button_click();
+                    self.audio.play_ui_scroll();
                 }
                 Ok(true)
             }
@@ -3209,7 +3227,7 @@ impl Game<'_> {
                     .position(|(o, _, _)| *o == self.shulkds_title.focus_idx)
                 else {
                     self.shulkds_title.focus_idx = focusables[0].0;
-                    self.audio.play_button_click();
+                    self.audio.play_ui_focus();
                     return Ok(true);
                 };
                 let (_, cur_rect, cur_act) = focusables[cur_pos];
@@ -3246,7 +3264,7 @@ impl Game<'_> {
                                         row_top.clamp(0.0, max_scroll);
                                 }
                                 self.shulkds_title.pending_row_focus = Some(next_idx);
-                                self.audio.play_button_click();
+                                self.audio.play_ui_focus();
                                 return Ok(true);
                             }
                         }
@@ -3278,7 +3296,7 @@ impl Game<'_> {
                                         row_top.clamp(0.0, max_scroll);
                                 }
                                 self.shulkds_title.pending_row_focus = Some(next_idx);
-                                self.audio.play_button_click();
+                                self.audio.play_ui_focus();
                                 return Ok(true);
                             }
                         }
@@ -3291,6 +3309,7 @@ impl Game<'_> {
                     horizon_client::gamepad::focus_step_rect(cur_rect, button, &rects)
                 {
                     let (next_ord, _, next_act) = focusables[next_pos];
+                    self.shulkds_title.pointer_pos = None;
                     self.shulkds_title.focus_idx = next_ord;
                     match next_act {
                         HitAct::SelectRow(idx) => {
@@ -3310,7 +3329,7 @@ impl Game<'_> {
                         }
                         _ => {}
                     }
-                    self.audio.play_button_click();
+                    self.audio.play_ui_focus();
                 }
                 Ok(true)
             }

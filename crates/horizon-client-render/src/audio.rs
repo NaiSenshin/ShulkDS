@@ -182,7 +182,25 @@ impl SoundCache {
 struct Decode {
     key: String,
     file: PathBuf,
+    bytes: Option<&'static [u8]>,
     channel: ChannelId,
+}
+
+fn bundled_ui_sound(namespace: &str, path: &str) -> Option<&'static [u8]> {
+    match (namespace, path) {
+        ("minecraft", "sounds/random/click.ogg") => {
+            Some(include_bytes!("../assets/legacy/sounds/click_stereo.ogg"))
+        }
+        ("legacy", "sounds/focus.ogg") => Some(include_bytes!("../assets/legacy/sounds/focus.ogg")),
+        ("legacy", "sounds/back.ogg") => Some(include_bytes!("../assets/legacy/sounds/back.ogg")),
+        ("legacy", "sounds/scroll.ogg") => {
+            Some(include_bytes!("../assets/legacy/sounds/scroll.ogg"))
+        }
+        ("legacy", "sounds/craft_fail.ogg") => {
+            Some(include_bytes!("../assets/legacy/sounds/craft_fail.ogg"))
+        }
+        _ => None,
+    }
 }
 /// Give a channel waiting on its sound the decoded samples and start it, as
 /// the buffer future attaching and playing the source. A source stopped or
@@ -246,12 +264,18 @@ pub struct Audio {
     device_ticks: u32,
 }
 fn decode(path: &Path) -> Option<(Vec<f32>, u32)> {
+    let file = fs::File::open(path).ok()?;
+    decode_source(Box::new(file))
+}
+fn decode_bytes(bytes: &'static [u8]) -> Option<(Vec<f32>, u32)> {
+    decode_source(Box::new(std::io::Cursor::new(bytes)))
+}
+fn decode_source(source: Box<dyn symphonia::core::io::MediaSource>) -> Option<(Vec<f32>, u32)> {
     use symphonia::core::{
         audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
         meta::MetadataOptions, probe::Hint,
     };
-    let file = fs::File::open(path).ok()?;
-    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let stream = MediaSourceStream::new(source, Default::default());
     let mut hint = Hint::new();
     hint.with_extension("ogg");
     let probed = symphonia::default::get_probe()
@@ -403,6 +427,7 @@ impl Backend for MixerBackend {
             return;
         }
         let (namespace, path) = sound.path();
+        let bytes = bundled_ui_sound(namespace, &path);
         let file = self.root.join("assets").join(namespace).join(&path);
         // A looping sound follows its entity in one client's tracking only: each keeps its own.
         if !looping && self.duplicate(channel, (namespace, &path)) {
@@ -412,7 +437,9 @@ impl Backend for MixerBackend {
             // A streamed sound loops by restarting its stream.
             let mixer = self.mixer.clone();
             std::thread::spawn(move || {
-                let samples = decode(&file).map(|(s, r)| (Arc::new(s), r));
+                let samples = bytes
+                    .map_or_else(|| decode(&file), decode_bytes)
+                    .map(|(s, r)| (Arc::new(s), r));
                 attach(&mixer, channel, samples, looping);
             });
             return;
@@ -433,7 +460,10 @@ impl Backend for MixerBackend {
                         // Queued twice before the first decode finished.
                         let cached = cache.lock().ok().and_then(|mut c| c.get(&job.key));
                         let samples = cached.unwrap_or_else(|| {
-                            let samples = decode(&job.file).map(|(s, r)| (Arc::new(s), r));
+                            let samples = job
+                                .bytes
+                                .map_or_else(|| decode(&job.file), decode_bytes)
+                                .map(|(s, r)| (Arc::new(s), r));
                             if let Ok(mut c) = cache.lock() {
                                 c.insert(job.key, samples.clone());
                             }
@@ -445,7 +475,12 @@ impl Backend for MixerBackend {
                 .expect("sound decoder thread");
             send
         });
-        let _ = decoder.send(Decode { key, file, channel });
+        let _ = decoder.send(Decode {
+            key,
+            file,
+            bytes,
+            channel,
+        });
     }
     /// `alSourceStop`: any state becomes stopped, an initial source too (a
     /// sound still decoding then never starts).
@@ -1344,13 +1379,23 @@ impl Audio {
     }
     /// `AbstractWidget.playButtonClickSound`: an unseeded, relative UI sound.
     pub fn play_button_click(&mut self) {
+        self.play_ui_sound("minecraft:ui.button.click", 0.25);
+    }
+    pub fn play_ui_focus(&mut self) {
+        self.play_ui_sound("legacy:random.focus", 1.0);
+    }
+    pub fn play_ui_back(&mut self) {
+        self.play_ui_sound("legacy:random.back", 1.0);
+    }
+    pub fn play_ui_scroll(&mut self) {
+        self.play_ui_sound("legacy:random.scroll", 1.0);
+    }
+    pub fn play_ui_craft_fail(&mut self) {
+        self.play_ui_sound("legacy:random.craft_fail", 1.0);
+    }
+    fn play_ui_sound(&mut self, event: &str, volume: f32) {
         self.play_instance(
-            SoundInstance::for_ui(
-                "minecraft:ui.button.click",
-                1.0,
-                0.25,
-                SoundEngine::unseeded(),
-            ),
+            SoundInstance::for_ui(event, 1.0, volume, SoundEngine::unseeded()),
             false,
         );
     }
@@ -1912,5 +1957,21 @@ mod tests {
         // The same cards list the same devices; a card added or removed does not.
         assert!(!cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]")));
         assert!(cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]\n 1 [USB ]")));
+    }
+
+    #[test]
+    fn bundled_legacy_console_ui_sounds_decode() {
+        for (ns, path) in [
+            ("minecraft", "sounds/random/click.ogg"),
+            ("legacy", "sounds/focus.ogg"),
+            ("legacy", "sounds/back.ogg"),
+            ("legacy", "sounds/scroll.ogg"),
+            ("legacy", "sounds/craft_fail.ogg"),
+        ] {
+            let bytes = bundled_ui_sound(ns, path).expect(path);
+            let (samples, rate) = decode_bytes(bytes).expect(path);
+            assert!(!samples.is_empty());
+            assert!(rate > 0);
+        }
     }
 }

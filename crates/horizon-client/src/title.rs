@@ -3141,10 +3141,12 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 right.u0 = r.u1 - (r.u1 - r.u0) * (half / r.w as f32);
                 batch.rect_uv(b.x + half, b.y, half, 20.0, right, u32::MAX);
             }
-            let color = if b.enabled {
-                u32::MAX
-            } else {
+            let color = if !b.enabled {
                 rgba(160, 160, 160, 255)
+            } else if hover {
+                rgba(255, 255, 160, 255)
+            } else {
+                u32::MAX
             };
             if let Some((icon, size)) = b.icon {
                 // CenteredIcon divides the button and sprite sizes separately:
@@ -4671,7 +4673,12 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             batch.sprite_region(
                 atlas,
                 crate::title_edition::SPRITE,
-                [(center_x - ew * 0.5).floor(), logo_y + lh - 7.0 * logo_scale, ew, eh],
+                [
+                    (center_x - ew * 0.5).floor(),
+                    logo_y + lh - 7.0 * logo_scale,
+                    ew,
+                    eh,
+                ],
                 128.0,
                 16.0,
             );
@@ -4699,7 +4706,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             let (sin, cos) = (-20.0f32).to_radians().sin_cos();
             for v in &mut batch.vertices[start..] {
                 let [x, y] = v.pos;
-                v.pos = [ax + scale * (x * cos - y * sin), ay + scale * (x * sin + y * cos)];
+                v.pos = [
+                    ax + scale * (x * cos - y * sin),
+                    ay + scale * (x * sin + y * cos),
+                ];
             }
         }
     }

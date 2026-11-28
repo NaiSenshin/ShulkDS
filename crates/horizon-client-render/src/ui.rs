@@ -183,9 +183,9 @@ fn scaling(sprite: &str, r: &Rect) -> NineSlice {
             "gui/sprites/widget/slider_handle" | "gui/sprites/widget/slider_handle_highlighted" => {
                 [2, 2, 2, 3]
             }
-            "legacy/tiles/panel"
-            | "legacy/tiles/panel_recess"
-            | "legacy/tiles/entity_panel" => [3; 4],
+            "legacy/tiles/panel" | "legacy/tiles/panel_recess" | "legacy/tiles/entity_panel" => {
+                [3; 4]
+            }
             "legacy/tiles/high_tab_left"
             | "legacy/tiles/high_tab_middle"
             | "legacy/tiles/high_tab_right"
@@ -677,6 +677,7 @@ pub fn button_as(
     nine_slice(batch, atlas, &sprite, x, y, w, h, u32::MAX);
     let color = match pressed_label() {
         Some(rgb) if active && hover => rgba((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255),
+        _ if active && hover => rgba(255, 255, 160, 255),
         _ if active => rgba(255, 255, 255, 255),
         _ => rgba(160, 160, 160, 255),
     };

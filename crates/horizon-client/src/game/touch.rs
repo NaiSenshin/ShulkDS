@@ -1484,19 +1484,22 @@ impl Game<'_> {
         }
         self.touch.sneaking
     }
+    pub(super) fn clear_touch_sneak(&mut self) {
+        self.touch.sneaking = false;
+    }
 
     /// Hold or let go of sneak as the Sneak button says, in its mode and with the player's flight:
     /// only on the playing screen, as vanilla lets go of the keys under a screen and gives a
     /// toggled one back when it closes.
     fn touch_sync_sneak(&mut self) {
-        let flying = self.player.as_ref().is_some_and(|p| p.flying);
+        let hold_only = self.crouch_requires_hold();
         let mode = self
             .touch
             .config
             .as_ref()
             .map(|c| c.sneak)
             .unwrap_or_default();
-        self.touch.controls.set_sneak(mode, flying);
+        self.touch.controls.set_sneak(mode, hold_only);
         // The death screen: KeyMapping.resetToggleKeys when the player respawns.
         if self.screen == Screen::Dead {
             self.touch.controls.clear_sneak();

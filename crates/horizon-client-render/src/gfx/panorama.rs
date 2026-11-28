@@ -11,6 +11,14 @@ use wgpu::util::DeviceExt;
 const FACE_ORDER: [u8; 6] = [1, 3, 5, 4, 0, 2];
 /// Where the cube's faces live in a resource root.
 const BACKGROUND: &str = "assets/minecraft/textures/gui/title/background";
+const SHULKDS_PANORAMA: [&[u8]; 6] = [
+    include_bytes!("../../assets/shulkds/panorama/panorama_0.png"),
+    include_bytes!("../../assets/shulkds/panorama/panorama_1.png"),
+    include_bytes!("../../assets/shulkds/panorama/panorama_2.png"),
+    include_bytes!("../../assets/shulkds/panorama/panorama_3.png"),
+    include_bytes!("../../assets/shulkds/panorama/panorama_4.png"),
+    include_bytes!("../../assets/shulkds/panorama/panorama_5.png"),
+];
 
 /// The title screen's six faces. The cube is on the GPU only while the title
 /// screen shows, and its texels are decoded from the faces' files each time it
@@ -41,6 +49,37 @@ impl Faces {
             );
             Self::colour([96, 110, 111, 255])
         })
+    }
+
+    /// Loads a custom resource-pack panorama from `root` when present,
+    /// otherwise uses ShulkDS's bundled End panorama.
+    pub fn load_shulkds(root: &Path, defaults: &Path) -> Self {
+        if root != defaults
+            && let Ok(custom) = Self::try_load(root, root)
+        {
+            return custom;
+        }
+        Self::shulkds_end()
+    }
+
+    /// ShulkDS's bundled End panorama.
+    pub fn shulkds_end() -> Self {
+        let files: Vec<Vec<u8>> = FACE_ORDER
+            .iter()
+            .map(|&face| SHULKDS_PANORAMA[face as usize].to_vec())
+            .collect();
+        match decode_faces(&files) {
+            Ok((size, texels)) => Self {
+                size,
+                files,
+                colour: [0; 4],
+                decoded: Mutex::new(Some(texels)),
+            },
+            Err(error) => {
+                log::warn!("Horizon: bundled ShulkDS panorama failed ({error})");
+                Self::colour([96, 110, 111, 255])
+            }
+        }
     }
 
     /// A one-texel cube of one colour.
@@ -658,5 +697,12 @@ mod tests {
         let pitched = projection(1920, 1080, 0.0, 10.0) * glam::Vec4::new(0.0, 0.0, 1.0, 1.0);
         let expected_y = 10.0f32.to_radians().tan() / 42.5f32.to_radians().tan();
         assert!((pitched.y / pitched.w - expected_y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn shulkds_end_panorama_decodes_six_square_faces() {
+        let faces = Faces::shulkds_end();
+        assert_eq!(faces.size, 1024);
+        assert_eq!(faces.texels().len(), 6 * 1024 * 1024 * 4);
     }
 }

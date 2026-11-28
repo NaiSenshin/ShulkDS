@@ -2127,7 +2127,7 @@ impl UiResources {
         std::thread::scope(|scope| {
             let panorama = scope.spawn(|| {
                 startup::time("ui.panorama", || {
-                    horizon_client::gfx::panorama::Faces::load(root, defaults)
+                    horizon_client::gfx::panorama::Faces::load_shulkds(root, defaults)
                 })
             });
             let mod_image = !horizon_client::mod_api::mods().is_empty();
@@ -2535,6 +2535,8 @@ struct Game<'a> {
     toggles: horizon_client::keymapping::ToggleKeys,
     /// A world screen with the pointer captured was open last frame.
     was_playing: bool,
+    was_riding: bool,
+    was_crouch_hold_only: bool,
     /// Minecraft.pause: a single-player screen that pauses the game is open.
     pause: bool,
     debug: bool,
@@ -7509,6 +7511,7 @@ impl Game<'_> {
         self.tick_debug_keys()?;
         self.tick_debug_charts();
         self.tick_tutorial();
+        self.sync_shulkds_crouch_state();
         if self.screen == Screen::Creative {
             self.refresh_creative_tabs();
             // CreativeModeInventoryScreen.containerTick: a player without
@@ -7746,6 +7749,49 @@ impl Game<'_> {
     /// Keep the held-key state of toggled sneak and sprint in step with their mapping.
     /// `KeyMapping.resetToggleKeys`: every toggle mapping up, and the latched sneak and sprint
     /// keys with it.
+    /// Whether crouching must be held rather than toggled (while flying or in water).
+    pub(super) fn crouch_requires_hold(&self) -> bool {
+        self.player.as_ref().is_some_and(|p| {
+            p.flying
+                || p.fluids.was_touching_water
+                || p.pose == horizon_client::pose::Pose::Swimming
+        })
+    }
+    fn effective_toggle_crouch(&self) -> bool {
+        self.settings.toggle_crouch && !self.crouch_requires_hold()
+    }
+    fn sync_shulkds_crouch_state(&mut self) {
+        if self.serving.is_some() || self.lan_acting.is_some() {
+            return;
+        }
+        let now_riding = self.riding.is_some();
+        if self.was_riding && !now_riding {
+            self.toggles.0[0].reset();
+            self.clear_touch_sneak();
+            self.sync_toggle(0);
+            if let Some(p) = self.player.as_mut() {
+                if p.pose == horizon_client::pose::Pose::Crouching {
+                    let _ = p.set_pose(horizon_client::pose::Pose::Standing);
+                }
+                p.local_crouching = false;
+            }
+        }
+        self.was_riding = now_riding;
+
+        let hold_only = self.crouch_requires_hold();
+        if !self.was_crouch_hold_only && hold_only {
+            let held = self.physical_keys.contains(&KeyCode::ShiftLeft)
+                || self
+                    .pad
+                    .holds_action(&self.settings.controller, "key.sneak");
+            if !held {
+                self.toggles.0[0].reset();
+                self.clear_touch_sneak();
+                self.sync_toggle(0);
+            }
+        }
+        self.was_crouch_hold_only = hold_only;
+    }
     fn reset_toggle_keys(&mut self) {
         for key in &mut self.toggles.0 {
             key.reset();
@@ -7796,8 +7842,9 @@ impl Game<'_> {
                 self.physical_keys.remove(&key);
             }
         }
+        let toggle_crouch = self.effective_toggle_crouch();
         for (slot, mapping, needs_toggle) in [
-            (0, "key.sneak", self.settings.toggle_crouch),
+            (0, "key.sneak", toggle_crouch),
             (1, "key.sprint", self.settings.toggle_sprint),
         ] {
             let held = match horizon_client::keybinds::key_code(self.settings.keys.get(mapping)) {
@@ -7854,7 +7901,7 @@ impl Game<'_> {
         // repeat) flips them when toggling; only releases reach them
         // behind a screen (KeyboardHandler.keyPress).
         let toggle = match key {
-            KeyCode::ShiftLeft => Some((0, self.settings.toggle_crouch)),
+            KeyCode::ShiftLeft => Some((0, self.effective_toggle_crouch())),
             KeyCode::ControlLeft => Some((1, self.settings.toggle_sprint)),
             _ => None,
         };
@@ -7896,7 +7943,7 @@ impl Game<'_> {
         }
         self.was_playing = playing;
         let options = [
-            self.settings.toggle_crouch,
+            self.effective_toggle_crouch(),
             self.settings.toggle_sprint,
             self.settings.toggle_attack,
             self.settings.toggle_use,
@@ -8028,7 +8075,7 @@ impl Game<'_> {
     /// toggles keeps its toggle state (`shouldSetOnIngameFocus`).
     fn restore_held_keys(&mut self) {
         let held: Vec<KeyCode> = self.physical_keys.iter().copied().collect();
-        let toggles = [self.settings.toggle_crouch, self.settings.toggle_sprint];
+        let toggles = [self.effective_toggle_crouch(), self.settings.toggle_sprint];
         for key in held {
             for mapped in self.settings.keys.translate_all(key) {
                 match mapped {
@@ -15624,10 +15671,12 @@ impl Game<'_> {
                 (true, false) => "gui/sprites/widget/button",
             };
             horizon_client::ui::blit_sprite(batch, atlas, sprite, x, y, 20.0, 20.0, u32::MAX);
-            let color = if active {
-                u32::MAX
-            } else {
+            let color = if !active {
                 rgba(160, 160, 160, 255)
+            } else if hover {
+                rgba(255, 255, 160, 255)
+            } else {
+                u32::MAX
             };
             let w = HudBatch::text_width(atlas, label);
             batch.text(atlas, label, x + (20.0 - w) / 2.0, y + 6.0, color, true);
@@ -18593,7 +18642,7 @@ impl Game<'_> {
                             // its key release, so leaving it down would keep the
                             // player sneaking or sprinting until the key is tapped.
                             for (slot, needs_toggle) in [
-                                self.settings.toggle_crouch,
+                                self.effective_toggle_crouch(),
                                 self.settings.toggle_sprint,
                                 self.settings.toggle_attack,
                                 self.settings.toggle_use,
@@ -20298,6 +20347,8 @@ impl<'a> Game<'a> {
             smooth_camera: false,
             toggles: Default::default(),
             was_playing: false,
+            was_riding: false,
+            was_crouch_hold_only: false,
             pause: false,
             debug: false,
             gpu_passes: false,

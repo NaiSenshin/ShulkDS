@@ -282,6 +282,25 @@ impl SoundRegistry {
             };
             registry.add_file(namespace, &text, &exists);
         }
+        const LEGACY_SOUNDS: &[u8] = br#"{
+            "random.focus": {"sounds": [{"name": "legacy:focus"}]},
+            "random.back": {"sounds": [{"name": "legacy:back"}]},
+            "random.scroll": {"sounds": [{"name": "legacy:scroll"}]},
+            "random.craft_fail": {"sounds": [{"name": "legacy:craft_fail"}]}
+        }"#;
+        let bundled = |ns: &str, path: &str| {
+            ns == "legacy"
+                && matches!(
+                    path,
+                    "sounds/focus.ogg"
+                        | "sounds/back.ogg"
+                        | "sounds/scroll.ogg"
+                        | "sounds/craft_fail.ogg"
+                )
+        };
+        registry.add_file("legacy", LEGACY_SOUNDS, &|ns, path| {
+            exists(ns, path) || bundled(ns, path)
+        });
         registry
     }
     /// No sound event at all: the resources hold no `sounds.json` (sounds not
